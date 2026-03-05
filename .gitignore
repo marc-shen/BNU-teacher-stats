@@ -1,0 +1,12 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+.dmux/
+BNUGRB DATA SYSTEM/
+BNUGRB_DATA_SYSTEM/
+BNUGRB DATA SYSTEM.app
+/output/
+/.DS_Store/
+dist/
+build/
+data/

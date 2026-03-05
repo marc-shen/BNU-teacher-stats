@@ -1,0 +1,44 @@
+name: Package App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos-arm64
+          - os: macos-13
+            platform: macos-x64
+          - os: windows-latest
+            platform: windows-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          environments: release
+
+      - name: Build with PyInstaller
+        run: pixi run -e release pyinstaller teacher_stats_app.spec --clean
+
+      - name: Zip macOS app
+        if: runner.os == 'macOS'
+        run: cd dist && zip -r9 "../教师科研统计分析工具-${{ matrix.platform }}.zip" "教师科研统计分析工具.app"
+
+      - name: Zip Windows app
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd dist
+          Compress-Archive -Path '教师科研统计分析工具' -DestinationPath "../教师科研统计分析工具-${{ matrix.platform }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 教师科研统计分析工具-${{ matrix.platform }}
+          path: 教师科研统计分析工具-*.zip
