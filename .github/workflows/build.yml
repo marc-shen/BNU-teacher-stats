@@ -1,16 +1,24 @@
-name: Package App
+name: Package and Release
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 v1.0.0）'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
 
 jobs:
   build:
     strategy:
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-14
             platform: macos-arm64
-          - os: macos-13
+          - os: macos-14-large
             platform: macos-x64
           - os: windows-latest
             platform: windows-x64
@@ -27,18 +35,67 @@ jobs:
       - name: Build with PyInstaller
         run: pixi run -e release pyinstaller teacher_stats_app.spec --clean
 
-      - name: Zip macOS app
+      - name: Create macOS DMG
         if: runner.os == 'macOS'
-        run: cd dist && zip -r9 "../教师科研统计分析工具-${{ matrix.platform }}.zip" "教师科研统计分析工具.app"
+        run: |
+          APP_NAME="教师科研统计分析工具"
+          DMG_NAME="${APP_NAME}-${{ matrix.platform }}.dmg"
 
-      - name: Zip Windows app
+          # 创建临时目录用于 DMG 内容
+          mkdir -p dmg_content
+          cp -R "dist/${APP_NAME}.app" dmg_content/
+          # 添加 Applications 快捷方式，方便用户拖拽安装
+          ln -s /Applications dmg_content/Applications
+
+          # 创建 DMG
+          hdiutil create -volname "${APP_NAME}" \
+            -srcfolder dmg_content \
+            -ov -format UDZO \
+            "${DMG_NAME}"
+
+      - name: Create Windows zip
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cd dist
-          Compress-Archive -Path '教师科研统计分析工具' -DestinationPath "../教师科研统计分析工具-${{ matrix.platform }}.zip"
+          $appName = "教师科研统计分析工具"
+          Compress-Archive -Path "dist\$appName" -DestinationPath "$appName-${{ matrix.platform }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: 教师科研统计分析工具-${{ matrix.platform }}
-          path: 教师科研统计分析工具-*.zip
+          name: ${{ matrix.platform }}
+          path: |
+            *.dmg
+            *.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: 教师科研统计分析工具 ${{ github.event.inputs.version }}
+          body: |
+            ## 下载说明
+
+            | 文件 | 平台 |
+            |------|------|
+            | `*-macos-arm64.dmg` | macOS（Apple Silicon） |
+            | `*-macos-x64.dmg` | macOS（Intel） |
+            | `*-windows-x64.zip` | Windows x64 |
+
+            ### macOS 安装
+            打开 DMG，将应用拖入 Applications 文件夹。
+
+            ### Windows 使用
+            解压 zip，运行 `教师科研统计分析工具.exe`。
+          files: |
+            *.dmg
+            *.zip
