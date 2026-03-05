@@ -185,7 +185,7 @@ def create_layout():
             sg.FileBrowse("浏览", file_types=file_types, target=f"-FILE_{key}-"),
             sg.Button("打开", key=f"-OPEN_FILE_DIR_{key}-"),
         ])
-    file_frame = sg.Frame("数据文件", file_rows)
+    file_frame = sg.Frame("数据文件", file_rows, expand_x=True)
 
     output_frame = sg.Frame("输出目录", [
         [sg.Text("基础目录:", size=(14, 1)),
@@ -198,7 +198,7 @@ def create_layout():
         [sg.Input(default_text=default_effective, size=(58, 1),
                   key="-EFFECTIVE_PATH-", disabled=True,
                   text_color="red", disabled_readonly_background_color="#f0f0f0")],
-    ])
+    ], expand_x=True)
 
     left_col = sg.Column([
         [file_frame],
@@ -209,11 +209,11 @@ def create_layout():
     teacher_frame = sg.Frame("教师姓名", [
         [sg.Text("输入教师姓名（每行一个或用逗号分隔）：")],
         [sg.Multiline(default_text="", size=(40, 8), key="-TEACHERS-")],
-    ])
+    ], expand_x=True)
 
     log_frame = sg.Frame("运行日志", [
         [sg.Multiline(size=(40, 15), key="-LOG-", disabled=True, autoscroll=True, font=FONT_LOG)],
-    ])
+    ], expand_x=True)
 
     right_col = sg.Column([
         [teacher_frame],
