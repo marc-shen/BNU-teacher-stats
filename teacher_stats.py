@@ -645,9 +645,11 @@ def md_to_pdf(md_path):
         print("  警告：未找到pandoc，跳过PDF生成。")
         return
     pdf_path = md_path.replace('.md', '.pdf')
+    md_dir = os.path.dirname(os.path.abspath(md_path))
     try:
         subprocess.run([
             pandoc, md_path, '-o', pdf_path,
+            '--resource-path', md_dir,
             '--pdf-engine=xelatex',
             '-V', 'CJKmainfont=STSong',
             '-V', 'geometry:margin=2cm',
