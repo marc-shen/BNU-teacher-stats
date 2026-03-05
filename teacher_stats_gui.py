@@ -21,7 +21,23 @@ except ImportError:
 import teacher_stats
 
 DEFAULT_DATA_PATH = teacher_stats.DATA_PATH
-DEFAULT_OUTPUT_BASE = Path.home() / "Documents"
+
+
+def _get_documents_path():
+    """获取用户文档文件夹路径（跨平台）"""
+    if platform.system() == "Windows":
+        try:
+            import ctypes.wintypes
+            CSIDL_PERSONAL = 5
+            buf = ctypes.create_unicode_buffer(ctypes.wintypes.MAX_PATH)
+            ctypes.windll.shell32.SHGetFolderPathW(None, CSIDL_PERSONAL, None, 0, buf)
+            return Path(buf.value)
+        except Exception:
+            return Path.home() / "Documents"
+    return Path.home() / "Documents"
+
+
+DEFAULT_OUTPUT_BASE = _get_documents_path()
 
 # 数据文件：key -> (显示名称, 默认文件名, 文件类型)
 DATA_FILE_INFO = {
