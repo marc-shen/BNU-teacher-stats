@@ -638,28 +638,25 @@ def _get_pandoc_path():
     return shutil.which("pandoc")
 
 
-def md_to_pdf(md_path):
-    """使用pandoc+xelatex将Markdown转为PDF"""
+def md_to_docx(md_path):
+    """使用pandoc将Markdown转为DOCX"""
     pandoc = _get_pandoc_path()
     if pandoc is None:
-        print("  警告：未找到pandoc，跳过PDF生成。")
+        print("  警告：未找到pandoc，跳过DOCX生成。")
         return
     md_abs = os.path.abspath(md_path)
     md_dir = os.path.dirname(md_abs)
     md_name = os.path.basename(md_abs)
-    pdf_name = md_name.replace('.md', '.pdf')
+    docx_name = md_name.replace('.md', '.docx')
     try:
         subprocess.run([
-            pandoc, md_name, '-o', pdf_name,
-            '--pdf-engine=xelatex',
-            '-V', 'CJKmainfont=STSong',
-            '-V', 'geometry:margin=2cm',
+            pandoc, md_name, '-o', docx_name,
         ], check=True, capture_output=True, text=True, cwd=md_dir)
-        print(f"  已生成PDF: {os.path.join(md_dir, pdf_name)}")
+        print(f"  已生成DOCX: {os.path.join(md_dir, docx_name)}")
     except subprocess.CalledProcessError as e:
-        print(f"  PDF生成失败: {e.stderr[:200] if e.stderr else e}")
+        print(f"  DOCX生成失败: {e.stderr[:200] if e.stderr else e}")
     except FileNotFoundError:
-        print("  警告：未找到pandoc，跳过PDF生成。")
+        print("  警告：未找到pandoc，跳过DOCX生成。")
 
 
 # ============================================================
@@ -739,7 +736,7 @@ def generate_individual_report(name, paper_stats, funding_stats, teacher_info, o
     with open(report_path, 'w', encoding='utf-8') as fout:
         fout.write('\n'.join(lines))
     print(f"  已生成报告: {report_path}")
-    md_to_pdf(report_path)
+    md_to_docx(report_path)
 
 
 def generate_comparison_report(names, paper_stats, funding_stats, teacher_infos, output_dir):
@@ -820,7 +817,7 @@ def generate_comparison_report(names, paper_stats, funding_stats, teacher_infos,
     with open(report_path, 'w', encoding='utf-8') as fout:
         fout.write('\n'.join(lines))
     print(f"  已生成对比报告: {report_path}")
-    md_to_pdf(report_path)
+    md_to_docx(report_path)
 
 
 # ============================================================
