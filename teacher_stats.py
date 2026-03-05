@@ -644,17 +644,18 @@ def md_to_pdf(md_path):
     if pandoc is None:
         print("  警告：未找到pandoc，跳过PDF生成。")
         return
-    pdf_path = md_path.replace('.md', '.pdf')
-    md_dir = os.path.dirname(os.path.abspath(md_path))
+    md_abs = os.path.abspath(md_path)
+    md_dir = os.path.dirname(md_abs)
+    md_name = os.path.basename(md_abs)
+    pdf_name = md_name.replace('.md', '.pdf')
     try:
         subprocess.run([
-            pandoc, md_path, '-o', pdf_path,
-            '--resource-path', md_dir,
+            pandoc, md_name, '-o', pdf_name,
             '--pdf-engine=xelatex',
             '-V', 'CJKmainfont=STSong',
             '-V', 'geometry:margin=2cm',
-        ], check=True, capture_output=True, text=True)
-        print(f"  已生成PDF: {pdf_path}")
+        ], check=True, capture_output=True, text=True, cwd=md_dir)
+        print(f"  已生成PDF: {os.path.join(md_dir, pdf_name)}")
     except subprocess.CalledProcessError as e:
         print(f"  PDF生成失败: {e.stderr[:200] if e.stderr else e}")
     except FileNotFoundError:
