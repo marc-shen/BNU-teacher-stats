@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import re
 import os
 import sys
+import platform
+import shutil
 import hashlib
 import subprocess
 from pathlib import Path
@@ -626,16 +628,29 @@ def draw_scatter_comparison(all_stats, teacher_names, output_dir):
 # ============================================================
 # Markdown转PDF
 # ============================================================
+def _get_pandoc_path():
+    """查找 pandoc 可执行文件（优先使用打包的版本）"""
+    app_dir = str(_get_base_path())
+    exe_name = "pandoc.exe" if platform.system() == "Windows" else "pandoc"
+    bundled = os.path.join(app_dir, exe_name)
+    if os.path.isfile(bundled):
+        return bundled
+    return shutil.which("pandoc")
+
+
 def md_to_pdf(md_path):
     """使用pandoc+xelatex将Markdown转为PDF"""
+    pandoc = _get_pandoc_path()
+    if pandoc is None:
+        print("  警告：未找到pandoc，跳过PDF生成。")
+        return
     pdf_path = md_path.replace('.md', '.pdf')
     try:
         subprocess.run([
-            'pandoc', md_path, '-o', pdf_path,
+            pandoc, md_path, '-o', pdf_path,
             '--pdf-engine=xelatex',
             '-V', 'CJKmainfont=STSong',
             '-V', 'geometry:margin=2cm',
-            # '-V', 'mainfont=Times New Roman',
         ], check=True, capture_output=True, text=True)
         print(f"  已生成PDF: {pdf_path}")
     except subprocess.CalledProcessError as e:
@@ -714,9 +729,8 @@ def generate_individual_report(name, paper_stats, funding_stats, teacher_info, o
         fname = f"{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
         img_path = os.path.join(output_dir, fname)
         if os.path.exists(img_path):
-            abs_img_path = os.path.abspath(img_path)
             lines.append(f"### {y_col} vs {x_col}\n")
-            lines.append(f"![{y_col} vs {x_col}]({abs_img_path})\n")
+            lines.append(f"![{y_col} vs {x_col}]({fname})\n")
 
     report_path = os.path.join(output_dir, f"{name}_统计报告.md")
     with open(report_path, 'w', encoding='utf-8') as fout:
@@ -796,9 +810,8 @@ def generate_comparison_report(names, paper_stats, funding_stats, teacher_infos,
         fname = f"对比_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
         img_path = os.path.join(output_dir, fname)
         if os.path.exists(img_path):
-            abs_img_path = os.path.abspath(img_path)
             lines.append(f"### {y_col} vs {x_col}\n")
-            lines.append(f"![{y_col} vs {x_col}]({abs_img_path})\n")
+            lines.append(f"![{y_col} vs {x_col}]({fname})\n")
 
     report_path = os.path.join(output_dir, "对比报告.md")
     with open(report_path, 'w', encoding='utf-8') as fout:

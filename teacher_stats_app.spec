@@ -1,9 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import shutil as _shutil
+import platform as _platform
+
+_pandoc_binaries = []
+_pandoc_path = _shutil.which('pandoc')
+if _pandoc_path:
+    _pandoc_binaries.append((_pandoc_path, '.'))
+
 a = Analysis(
     ['teacher_stats_gui.py'],
     pathex=[],
-    binaries=[],
+    binaries=_pandoc_binaries,
     datas=[
         ('teacher_stats_config.toml', '.'),
     ],

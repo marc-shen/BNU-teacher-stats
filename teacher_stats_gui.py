@@ -116,14 +116,25 @@ def load_config():
     last = data.get("last")
     if not last:
         return default_cfg
+    cached_output = last.get("output_base", "")
+    # 缓存的路径可能来自其他操作系统，验证其有效性
+    if cached_output and Path(cached_output).exists():
+        output_base = cached_output
+    else:
+        output_base = default_cfg["output_base"]
+
     cfg = {
         "teachers": last.get("teachers", default_cfg["teachers"]),
-        "output_base": last.get("output_base", default_cfg["output_base"]),
+        "output_base": output_base,
         "use_subdir": last.get("use_subdir", default_cfg["use_subdir"]),
         "files": dict(default_cfg["files"]),
     }
     for key in DATA_FILE_INFO:
-        cfg["files"][key] = last.get("files", {}).get(key, default_cfg["files"][key])
+        cached_file = last.get("files", {}).get(key, "")
+        if cached_file and Path(cached_file).exists():
+            cfg["files"][key] = cached_file
+        else:
+            cfg["files"][key] = default_cfg["files"][key]
     return cfg
 
 
