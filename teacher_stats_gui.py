@@ -175,56 +175,59 @@ def create_layout():
     base_has_subdir = (Path(default_base) / SUBDIR_NAME).is_dir()
     status_text = "✅ 已存在" if base_has_subdir else "⚠️ 不存在，运行时自动创建"
 
-    teacher_frame = sg.Frame("教师姓名", [
-        [sg.Text("输入教师姓名（每行一个或用逗号分隔）：")],
-        [sg.Multiline(
-            default_text="",
-            size=(60, 5),
-            key="-TEACHERS-",
-        )],
-    ])
-
+    # --- 左栏：数据文件、输出目录、复选框 ---
     file_rows = []
     for key, (label, default_name, file_types) in DATA_FILE_INFO.items():
         default_path = str(DEFAULT_DATA_PATH / default_name)
         file_rows.append([
-            sg.Text(f"{label}:"),
+            sg.Text(f"{label}:", size=(14, 1)),
+            sg.Input(default_text=default_path, size=(36, 1), key=f"-FILE_{key}-"),
             sg.FileBrowse("浏览", file_types=file_types, target=f"-FILE_{key}-"),
-            sg.Button("打开文件夹", key=f"-OPEN_FILE_DIR_{key}-"),
-        ])
-        file_rows.append([
-            sg.Input(default_text=default_path, size=(65, 1), key=f"-FILE_{key}-"),
+            sg.Button("打开", key=f"-OPEN_FILE_DIR_{key}-"),
         ])
     file_frame = sg.Frame("数据文件", file_rows)
 
     output_frame = sg.Frame("输出目录", [
-        [sg.Text("基础目录:")],
-        [sg.Input(default_text=default_base, size=(58, 1), key="-OUTPUT_BASE-", enable_events=True),
+        [sg.Text("基础目录:", size=(14, 1)),
+         sg.Input(default_text=default_base, size=(36, 1), key="-OUTPUT_BASE-", enable_events=True),
          sg.FolderBrowse("浏览")],
         [sg.Checkbox(f"输出到 {SUBDIR_NAME} 子文件夹", default=True,
                      key="-USE_SUBDIR-", enable_events=True),
          sg.Text(status_text, key="-SUBDIR_STATUS-", size=(22, 1))],
         [sg.Text("实际输出路径:")],
-        [sg.Input(default_text=default_effective, size=(65, 1),
+        [sg.Input(default_text=default_effective, size=(58, 1),
                   key="-EFFECTIVE_PATH-", disabled=True,
                   text_color="red", disabled_readonly_background_color="#f0f0f0")],
     ])
 
-    log_frame = sg.Frame("运行日志", [
-        [sg.Multiline(size=(70, 15), key="-LOG-", disabled=True, autoscroll=True, font=FONT_LOG)],
-    ])
-
-    layout = [
-        [teacher_frame],
+    left_col = sg.Column([
         [file_frame],
         [output_frame],
+    ], vertical_alignment='top')
+
+    # --- 右栏：教师姓名、运行日志 ---
+    teacher_frame = sg.Frame("教师姓名", [
+        [sg.Text("输入教师姓名（每行一个或用逗号分隔）：")],
+        [sg.Multiline(default_text="", size=(40, 8), key="-TEACHERS-")],
+    ])
+
+    log_frame = sg.Frame("运行日志", [
+        [sg.Multiline(size=(40, 15), key="-LOG-", disabled=True, autoscroll=True, font=FONT_LOG)],
+    ])
+
+    right_col = sg.Column([
+        [teacher_frame],
+        [log_frame],
+    ], vertical_alignment='top')
+
+    layout = [
+        [left_col, right_col],
         [sg.Button("运行", key="-RUN-", size=(8, 1)),
          sg.Button("刷新", key="-REFRESH-", size=(8, 1)),
          sg.Button("恢复默认配置", key="-RESET_DEFAULT-"),
          sg.Button("恢复上次配置", key="-RESET_LAST-"),
          sg.Button("打开输出目录", key="-OPEN_DIR-", size=(14, 1)),
          sg.Button("退出", key="-EXIT-", size=(8, 1))],
-        [log_frame],
     ]
     return layout
 
@@ -281,7 +284,7 @@ def run_analysis(window, log_queue, teacher_names, file_paths, output_path):
 
 
 def main():
-    sg.theme("SystemDefault")
+    sg.theme("LightGrey1")
     sg.set_options(font=FONT_MAIN)
     window = sg.Window("教师科研统计分析工具", create_layout(), finalize=True)
 
