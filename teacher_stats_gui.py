@@ -250,6 +250,7 @@ def create_layout():
     layout = [
         [left_col, right_col],
         [sg.Button("运行", key="-RUN-", size=(8, 1)),
+         sg.Button("院系统计", key="-DEPT_STATS-", size=(10, 1)),
          sg.Button("刷新", key="-REFRESH-", size=(8, 1)),
          sg.Button("恢复默认配置", key="-RESET_DEFAULT-"),
          sg.Button("恢复上次配置", key="-RESET_LAST-"),
@@ -306,6 +307,23 @@ def run_analysis(window, log_queue, teacher_names, file_paths, output_path):
     except Exception as e:
         print(f"\n\n错误: {e}")
         window.write_event_value("-ERROR-", str(e))
+    finally:
+        sys.stdout = old_stdout
+
+
+def run_department_analysis(window, log_queue, file_paths, output_path):
+    """在子线程中运行院系统计，stdout 实时写入 queue"""
+    old_stdout = sys.stdout
+    sys.stdout = QueueWriter(log_queue)
+    try:
+        result_dir = teacher_stats.run_department_stats(
+            file_paths=file_paths,
+            output_path=output_path,
+        )
+        window.write_event_value("-DEPT_DONE-", result_dir)
+    except Exception as e:
+        print(f"\n\n错误: {e}")
+        window.write_event_value("-DEPT_ERROR-", str(e))
     finally:
         sys.stdout = old_stdout
 
@@ -394,6 +412,7 @@ def main():
 
             running = True
             window["-RUN-"].update(disabled=True)
+            window["-DEPT_STATS-"].update(disabled=True)
             window["-LOG-"].update("")
             log_queue.put(f"开始分析：{', '.join(names)}\n")
             log_queue.put(f"输出目录：{effective_path}\n")
@@ -405,11 +424,44 @@ def main():
             )
             thread.start()
 
+        if event == "-DEPT_STATS-" and not running:
+            file_paths = {}
+            missing = []
+            for key in DATA_FILE_INFO:
+                p = values[f"-FILE_{key}-"].strip()
+                if not p or not Path(p).exists():
+                    missing.append(DATA_FILE_INFO[key][0])
+                file_paths[key] = p
+
+            if missing:
+                sg.popup_error(f"以下文件不存在：\n" + "\n".join(missing))
+                continue
+
+            effective_path = values["-EFFECTIVE_PATH-"].strip()
+            if not effective_path:
+                sg.popup_error("请选择输出目录！")
+                continue
+
+            running = True
+            window["-RUN-"].update(disabled=True)
+            window["-DEPT_STATS-"].update(disabled=True)
+            window["-LOG-"].update("")
+            log_queue.put("开始院系整体统计分析...\n")
+            log_queue.put(f"输出目录：{effective_path}\n")
+
+            thread = threading.Thread(
+                target=run_department_analysis,
+                args=(window, log_queue, file_paths, effective_path),
+                daemon=True,
+            )
+            thread.start()
+
         if event == "-DONE-":
             result_dir = values[event]
             window["-LOG-"].update("\n✅ 分析完成！", append=True)
             running = False
             window["-RUN-"].update(disabled=False)
+            window["-DEPT_STATS-"].update(disabled=False)
             # 刷新状态（文件夹已创建）
             update_output_preview(window, values)
             if result_dir:
@@ -419,6 +471,23 @@ def main():
             window["-LOG-"].update("\n❌ 分析出错！", append=True)
             running = False
             window["-RUN-"].update(disabled=False)
+            window["-DEPT_STATS-"].update(disabled=False)
+
+        if event == "-DEPT_DONE-":
+            result_dir = values[event]
+            window["-LOG-"].update("\n✅ 院系统计完成！", append=True)
+            running = False
+            window["-RUN-"].update(disabled=False)
+            window["-DEPT_STATS-"].update(disabled=False)
+            update_output_preview(window, values)
+            if result_dir:
+                open_folder(result_dir)
+
+        if event == "-DEPT_ERROR-":
+            window["-LOG-"].update("\n❌ 院系统计出错！", append=True)
+            running = False
+            window["-RUN-"].update(disabled=False)
+            window["-DEPT_STATS-"].update(disabled=False)
 
         if event == "-OPEN_DIR-":
             effective_path = values["-EFFECTIVE_PATH-"].strip()
