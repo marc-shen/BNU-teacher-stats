@@ -980,7 +980,7 @@ def main(teacher_names=None, file_paths=None, output_path=None):
 # 院系统计功能
 # ============================================================
 VALID_DEPARTMENTS = ['天文', '物理', '核科学与技术']
-DEPT_COL_NAME = '部门（行政人员部门暂为学院）'
+DEPT_COL_NAME = '部门\n（行政人员部门暂为学院）'
 
 DEPT_SCATTER_CONFIGS = [
     ('生涯总经费(万元)', '总文章数量'),
