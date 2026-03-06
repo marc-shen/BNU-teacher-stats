@@ -227,9 +227,16 @@ def create_layout():
                   text_color="red", disabled_readonly_background_color="#f0f0f0")],
     ], expand_x=True)
 
+    extra_year = teacher_stats.current_year - teacher_stats.RECENT_YEARS
+    extra_year_frame = sg.Frame("近五年范围", [
+        [sg.Checkbox(f"包含{extra_year}年（第六年）", default=False,
+                     key="-INCLUDE_EXTRA_YEAR-")],
+    ], expand_x=True)
+
     left_col = sg.Column([
         [file_frame],
         [output_frame],
+        [extra_year_frame],
     ], vertical_alignment='top')
 
     # --- 右栏：教师姓名、运行日志 ---
@@ -414,7 +421,10 @@ def main():
             window["-RUN-"].update(disabled=True)
             window["-DEPT_STATS-"].update(disabled=True)
             window["-LOG-"].update("")
+            # 设置近五年范围
+            teacher_stats.RECENT_YEARS = 6 if values["-INCLUDE_EXTRA_YEAR-"] else 5
             log_queue.put(f"开始分析：{', '.join(names)}\n")
+            log_queue.put(f"近五年范围：{teacher_stats.current_year - teacher_stats.RECENT_YEARS + 1}-{teacher_stats.current_year}\n")
             log_queue.put(f"输出目录：{effective_path}\n")
 
             thread = threading.Thread(
@@ -446,7 +456,10 @@ def main():
             window["-RUN-"].update(disabled=True)
             window["-DEPT_STATS-"].update(disabled=True)
             window["-LOG-"].update("")
+            # 设置近五年范围
+            teacher_stats.RECENT_YEARS = 6 if values["-INCLUDE_EXTRA_YEAR-"] else 5
             log_queue.put("开始院系整体统计分析...\n")
+            log_queue.put(f"近五年范围：{teacher_stats.current_year - teacher_stats.RECENT_YEARS + 1}-{teacher_stats.current_year}\n")
             log_queue.put(f"输出目录：{effective_path}\n")
 
             thread = threading.Thread(

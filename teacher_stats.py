@@ -83,8 +83,10 @@ HASH_PREFIX = "# data_hash:"
 
 
 def compute_data_hash(file_paths=None):
-    """计算data目录下所有关键数据文件的综合哈希值"""
+    """计算data目录下所有关键数据文件的综合哈希值（含 RECENT_YEARS 和 current_year）"""
     h = hashlib.md5()
+    # 将近几年参数纳入哈希，切换时自动使缓存失效
+    h.update(f"current_year={current_year},RECENT_YEARS={RECENT_YEARS}".encode('utf-8'))
     if file_paths is None:
         paths = [(fname, DATA_PATH / fname) for fname in sorted(DATA_FILES)]
     else:
