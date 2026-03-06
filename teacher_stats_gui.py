@@ -231,6 +231,8 @@ def create_layout():
     extra_year_frame = sg.Frame("近五年范围", [
         [sg.Checkbox(f"包含{extra_year}年（第六年）", default=False,
                      key="-INCLUDE_EXTRA_YEAR-")],
+        [sg.Checkbox(f"包含{teacher_stats.current_year}年（今年）", default=True,
+                     key="-INCLUDE_CURRENT_YEAR-")],
     ], expand_x=True)
 
     left_col = sg.Column([
@@ -423,8 +425,10 @@ def main():
             window["-LOG-"].update("")
             # 设置近五年范围
             teacher_stats.RECENT_YEARS = 6 if values["-INCLUDE_EXTRA_YEAR-"] else 5
+            teacher_stats.INCLUDE_CURRENT_YEAR = values["-INCLUDE_CURRENT_YEAR-"]
+            yr_start, yr_end = teacher_stats._recent_year_range()
             log_queue.put(f"开始分析：{', '.join(names)}\n")
-            log_queue.put(f"近五年范围：{teacher_stats.current_year - teacher_stats.RECENT_YEARS + 1}-{teacher_stats.current_year}\n")
+            log_queue.put(f"统计范围：{yr_start}-{yr_end}\n")
             log_queue.put(f"输出目录：{effective_path}\n")
 
             thread = threading.Thread(
@@ -458,8 +462,10 @@ def main():
             window["-LOG-"].update("")
             # 设置近五年范围
             teacher_stats.RECENT_YEARS = 6 if values["-INCLUDE_EXTRA_YEAR-"] else 5
+            teacher_stats.INCLUDE_CURRENT_YEAR = values["-INCLUDE_CURRENT_YEAR-"]
+            yr_start, yr_end = teacher_stats._recent_year_range()
             log_queue.put("开始院系整体统计分析...\n")
-            log_queue.put(f"近五年范围：{teacher_stats.current_year - teacher_stats.RECENT_YEARS + 1}-{teacher_stats.current_year}\n")
+            log_queue.put(f"统计范围：{yr_start}-{yr_end}\n")
             log_queue.put(f"输出目录：{effective_path}\n")
 
             thread = threading.Thread(

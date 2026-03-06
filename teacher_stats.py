@@ -57,6 +57,15 @@ _setup_chinese_font()
 
 current_year = datetime.now().year
 RECENT_YEARS = 5  # 近五年
+INCLUDE_CURRENT_YEAR = True  # 是否包含今年
+
+
+def _recent_year_range():
+    """返回近几年的起止年份 (start, end)"""
+    end = current_year if INCLUDE_CURRENT_YEAR else current_year - 1
+    start = current_year - RECENT_YEARS + 1
+    return start, end
+
 
 # 数据路径（兼容 PyInstaller 打包：冻结时从 sys._MEIPASS 读取 bundled 资源）
 def _get_base_path():
@@ -86,7 +95,7 @@ def compute_data_hash(file_paths=None):
     """计算data目录下所有关键数据文件的综合哈希值（含 RECENT_YEARS 和 current_year）"""
     h = hashlib.md5()
     # 将近几年参数纳入哈希，切换时自动使缓存失效
-    h.update(f"current_year={current_year},RECENT_YEARS={RECENT_YEARS}".encode('utf-8'))
+    h.update(f"current_year={current_year},RECENT_YEARS={RECENT_YEARS},INCLUDE_CURRENT_YEAR={INCLUDE_CURRENT_YEAR}".encode('utf-8'))
     if file_paths is None:
         paths = [(fname, DATA_PATH / fname) for fname in sorted(DATA_FILES)]
     else:
@@ -328,7 +337,7 @@ def match_papers_for_teachers(teachers_df, papers_df):
     corresponding_unit_col_vals = papers_df['通讯作者单位'].fillna('').str.lower().tolist()
     year_vals = papers_df['_year'].tolist()
 
-    five_year_start = current_year - RECENT_YEARS + 1
+    five_year_start, recent_year_end = _recent_year_range()
 
     results = []
     total = len(teacher_pinyin)
@@ -398,7 +407,7 @@ def match_papers_for_teachers(teachers_df, papers_df):
                 if is_corresponding:
                     corresponding_papers += 1
 
-                if year is not None and year >= five_year_start:
+                if year is not None and five_year_start <= year <= recent_year_end:
                     recent_papers += 1
                     if is_first:
                         recent_first_order_papers += 1
@@ -448,7 +457,7 @@ def compute_funding_stats(teachers_df, vertical_df, horizontal_df):
     """
     print("开始统计项目经费...")
     teacher_names_set = set(teachers_df['姓名'].dropna().astype(str))
-    five_year_start = current_year - RECENT_YEARS + 1
+    five_year_start, recent_year_end = _recent_year_range()
 
     # --- 纵向项目 ---
     v_all = vertical_df.copy()
@@ -470,7 +479,7 @@ def compute_funding_stats(teachers_df, vertical_df, horizontal_df):
         # NSFC统计
         nsfc_mine = v_nsfc[v_nsfc['负责人'] == name]
         nsfc_total = len(nsfc_mine)
-        nsfc_recent = len(nsfc_mine[nsfc_mine['_year'].apply(lambda y: y is not None and y >= five_year_start)])
+        nsfc_recent = len(nsfc_mine[nsfc_mine['_year'].apply(lambda y: y is not None and five_year_start <= y <= recent_year_end)])
 
         # 生涯总经费 = 纵向 + 横向
         v_mine = v_teacher[v_teacher['负责人'] == name]
@@ -481,10 +490,10 @@ def compute_funding_stats(teachers_df, vertical_df, horizontal_df):
         v_recent_funding = 0.0
         h_recent_funding = 0.0
         if len(v_mine) > 0:
-            v_recent = v_mine[v_mine['_year'].apply(lambda y: y is not None and y >= five_year_start)]
+            v_recent = v_mine[v_mine['_year'].apply(lambda y: y is not None and five_year_start <= y <= recent_year_end)]
             v_recent_funding = v_recent['_funding'].sum() if len(v_recent) > 0 else 0.0
         if len(h_mine) > 0:
-            h_recent = h_mine[h_mine['_year'].apply(lambda y: y is not None and y >= five_year_start)]
+            h_recent = h_mine[h_mine['_year'].apply(lambda y: y is not None and five_year_start <= y <= recent_year_end)]
             h_recent_funding = h_recent['_funding'].sum() if len(h_recent) > 0 else 0.0
         recent_funding = v_recent_funding + h_recent_funding
 
@@ -860,7 +869,7 @@ def main(teacher_names=None, file_paths=None, output_path=None):
         sys.exit(1)
 
     print(f"查询教师：{'、'.join(teacher_names)}")
-    print(f"当前年份：{current_year}，近五年范围：{current_year - RECENT_YEARS + 1}-{current_year}")
+    print(f"当前年份：{current_year}，统计范围：{_recent_year_range()[0]}-{_recent_year_range()[1]}")
     print("=" * 60)
 
     # 1. 计算数据文件哈希值
@@ -1197,8 +1206,8 @@ def draw_talent_comparison(all_stats, dept_info, output_dir):
 
 def compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df):
     """按院系和年份统计经费（近五年），只考虑三个系"""
-    five_year_start = current_year - RECENT_YEARS + 1
-    years = list(range(five_year_start, current_year + 1))
+    five_year_start, recent_year_end = _recent_year_range()
+    years = list(range(five_year_start, recent_year_end + 1))
 
     teacher_dept = _get_teacher_dept_map(teachers_df)
     teacher_names_set = set(teacher_dept.keys())
@@ -1237,8 +1246,8 @@ def compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df):
 
 def compute_yearly_papers_by_dept(teachers_df, papers_df):
     """按院系和年份统计文章数量（使用成果归属学者快速匹配），只考虑三个系"""
-    five_year_start = current_year - RECENT_YEARS + 1
-    years = list(range(five_year_start, current_year + 1))
+    five_year_start, recent_year_end = _recent_year_range()
+    years = list(range(five_year_start, recent_year_end + 1))
 
     teacher_dept = _get_teacher_dept_map(teachers_df)
 
@@ -1252,7 +1261,7 @@ def compute_yearly_papers_by_dept(teachers_df, papers_df):
 
     for idx in range(len(papers)):
         yr = year_vals[idx]
-        if yr is None or yr < five_year_start or yr > current_year:
+        if yr is None or yr < five_year_start or yr > recent_year_end:
             continue
         scholar_str = scholar_vals[idx]
         matched_depts = set()
@@ -1364,7 +1373,7 @@ def generate_department_report(all_stats, dept_info, comparison,
     lines = []
     lines.append(f"# 院系整体统计报告\n")
     lines.append(f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-    lines.append(f"近五年范围：{current_year - RECENT_YEARS + 1}—{current_year}\n")
+    lines.append(f"近五年范围：{_recent_year_range()[0]}—{_recent_year_range()[1]}\n")
     lines.append(f"统计院系：{'、'.join(VALID_DEPARTMENTS)}\n")
 
     # 基本概况
@@ -1473,7 +1482,7 @@ def run_department_stats(file_paths=None, output_path=None):
     print("=" * 60)
     print("开始院系整体统计分析")
     print(f"统计院系：{'、'.join(VALID_DEPARTMENTS)}")
-    print(f"当前年份：{current_year}，近五年范围：{current_year - RECENT_YEARS + 1}-{current_year}")
+    print(f"当前年份：{current_year}，统计范围：{_recent_year_range()[0]}-{_recent_year_range()[1]}")
     print("=" * 60)
 
     # 1. 加载数据
