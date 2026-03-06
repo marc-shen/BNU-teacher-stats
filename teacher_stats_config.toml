@@ -1,13 +1,2 @@
 # 此文件由程序自动生成，仅缓存上次退出时的界面状态
 
-[last]
-teachers = []
-output_base = "/Users/marcshen/Documents"
-use_subdir = true
-
-[last.files]
-"在编信息汇总" = "/Users/marcshen/program/test/data/在编信息汇总.xlsx"
-"人才信息汇总" = "/Users/marcshen/program/test/data/人才信息汇总.xlsx"
-"成果批量导出" = "/Users/marcshen/program/test/data/成果批量导出.xlsx"
-"纵向项目" = "/Users/marcshen/program/test/data/纵向项目.xls"
-"横向项目" = "/Users/marcshen/program/test/data/横向项目.xls"
