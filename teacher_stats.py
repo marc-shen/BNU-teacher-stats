@@ -900,11 +900,23 @@ def main(teacher_names=None, file_paths=None, output_path=None):
             teachers_df = filter_teachers(people_df)
             papers_cleaned = deduplicate_papers(papers_df)
             paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
+            tdm = _get_teacher_dept_map(teachers_df)
+            paper_stats['院系'] = paper_stats['姓名'].map(tdm).fillna('')
             save_csv_with_hash(paper_stats, paper_csv, data_hash)
             print(f"文章统计已保存: {paper_csv}")
         else:
             # 仍需加载原始数据用于个人信息查询和散点图
             people_df, talent_df, _, _, _ = load_all_data(file_paths)
+            # 补充院系列（如果缺失）
+            if '院系' not in paper_stats.columns or '院系' not in funding_stats.columns:
+                teachers_df = filter_teachers(people_df)
+                tdm = _get_teacher_dept_map(teachers_df)
+                if '院系' not in paper_stats.columns:
+                    paper_stats['院系'] = paper_stats['姓名'].map(tdm).fillna('')
+                    save_csv_with_hash(paper_stats, paper_csv, data_hash)
+                if '院系' not in funding_stats.columns:
+                    funding_stats['院系'] = funding_stats['姓名'].map(tdm).fillna('')
+                    save_csv_with_hash(funding_stats, funding_csv, data_hash)
     else:
         # 1. 加载数据
         people_df, talent_df, papers_df, vertical_df, horizontal_df = load_all_data(file_paths)
@@ -923,11 +935,14 @@ def main(teacher_names=None, file_paths=None, output_path=None):
 
         # 4. 文章匹配统计
         paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
+        tdm = _get_teacher_dept_map(teachers_df)
+        paper_stats['院系'] = paper_stats['姓名'].map(tdm).fillna('')
         save_csv_with_hash(paper_stats, paper_csv, data_hash)
         print(f"文章统计已保存: {paper_csv}")
 
         # 5. 经费统计
         funding_stats = compute_funding_stats(teachers_df, vertical_df, horizontal_df)
+        funding_stats['院系'] = funding_stats['姓名'].map(tdm).fillna('')
         save_csv_with_hash(funding_stats, funding_csv, data_hash)
         print(f"经费统计已保存: {funding_csv}")
 
@@ -964,22 +979,38 @@ def main(teacher_names=None, file_paths=None, output_path=None):
 # ============================================================
 # 院系统计功能
 # ============================================================
+VALID_DEPARTMENTS = ['天文', '物理', '核科学与技术']
+DEPT_COL_NAME = '部门（行政人员部门暂为学院）'
+
 DEPT_SCATTER_CONFIGS = [
-    ('近五年总经费(万元)', '近五年文章数量'),
-    ('近五年总经费(万元)', '近五年通讯作者文章数量'),
     ('生涯总经费(万元)', '总文章数量'),
+    ('生涯总经费(万元)', '第一署名单位文章数量'),
     ('生涯总经费(万元)', '通讯作者文章数量'),
+    ('生涯总经费(万元)', '近五年文章数量'),
+    ('生涯总经费(万元)', '近五年第一署名单位文章数量'),
+    ('生涯总经费(万元)', '近五年通讯作者文章数量'),
+    ('近五年总经费(万元)', '总文章数量'),
+    ('近五年总经费(万元)', '第一署名单位文章数量'),
+    ('近五年总经费(万元)', '通讯作者文章数量'),
+    ('近五年总经费(万元)', '近五年文章数量'),
+    ('近五年总经费(万元)', '近五年第一署名单位文章数量'),
+    ('近五年总经费(万元)', '近五年通讯作者文章数量'),
 ]
+
+DEPT_COLOR_MAP = {
+    '天文': '#1f77b4',
+    '物理': '#ff7f0e',
+    '核科学与技术': '#2ca02c',
+}
 
 DEPT_COLORS = [
     '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
     '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-    '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
 ]
 
 
 def _get_dept_talent_info(teachers_df, talent_df):
-    """获取每位教师的院系（一级学科）和人才（特聘）信息"""
+    """获取每位教师的院系（部门）和人才（特聘）信息，只保留天文/物理/核科学与技术"""
     talent_names = set()
     if talent_df is not None:
         for _, row in talent_df.iterrows():
@@ -990,81 +1021,106 @@ def _get_dept_talent_info(teachers_df, talent_df):
     info = {}
     for _, row in teachers_df.iterrows():
         name = str(row['姓名'])
-        dept = row.get('一级学科', '')
+        dept = row.get(DEPT_COL_NAME, '')
         if pd.isna(dept) or str(dept).strip() in ('', 'nan'):
-            dept = '未知'
-        else:
-            dept = str(dept).strip()
+            continue
+        dept = str(dept).strip()
+        if dept not in VALID_DEPARTMENTS:
+            continue
         info[name] = {
-            '一级学科': dept,
+            '院系': dept,
             '是否特聘': name in talent_names,
         }
     return info
 
 
+def _get_teacher_dept_map(teachers_df):
+    """构建教师姓名到院系的映射，只保留三个系"""
+    teacher_dept = {}
+    for _, row in teachers_df.iterrows():
+        name = str(row['姓名'])
+        dept = row.get(DEPT_COL_NAME, '')
+        if pd.isna(dept) or str(dept).strip() in ('', 'nan'):
+            continue
+        dept = str(dept).strip()
+        if dept in VALID_DEPARTMENTS:
+            teacher_dept[name] = dept
+    return teacher_dept
+
+
 def draw_department_scatters(all_stats, dept_info, output_dir):
-    """绘制按院系分类的散点图（标注姓名）和按特聘/非特聘分类的散点图"""
+    """绘制散点图：每个系单独高亮图 + 三系总览图，共 12 × (3+1) = 48 张"""
     os.makedirs(output_dir, exist_ok=True)
     stats = all_stats.copy()
-    stats['一级学科'] = stats['姓名'].map(lambda n: dept_info.get(n, {}).get('一级学科', '未知'))
-    stats['是否特聘'] = stats['姓名'].map(lambda n: dept_info.get(n, {}).get('是否特聘', False))
+    # 只保留三个系的教师
+    stats = stats[stats['姓名'].isin(dept_info)]
+    stats['院系'] = stats['姓名'].map(lambda n: dept_info[n]['院系'])
 
-    departments = sorted(stats['一级学科'].unique())
-    dept_color_map = {d: DEPT_COLORS[i % len(DEPT_COLORS)] for i, d in enumerate(departments)}
+    departments = VALID_DEPARTMENTS
+    total_charts = 0
 
     for x_col, y_col in DEPT_SCATTER_CONFIGS:
-        # --- 按学科分色散点图 ---
-        fig, ax = plt.subplots(figsize=(16, 11))
+        # --- 每个系的单独图（本系彩色+标注姓名，其他系灰色背景） ---
         for dept in departments:
-            sub = stats[stats['一级学科'] == dept]
-            ax.scatter(sub[x_col], sub[y_col], c=dept_color_map[dept], s=50, alpha=0.7,
-                       label=dept, edgecolors='gray', linewidths=0.3, zorder=2)
-            for _, r in sub.iterrows():
-                ax.annotate(r['姓名'], (r[x_col], r[y_col]),
-                            fontsize=5, alpha=0.65, xytext=(3, 3),
-                            textcoords='offset points')
-        ax.set_xlabel(x_col, fontsize=12)
-        ax.set_ylabel(y_col, fontsize=12)
-        ax.set_title(f'{y_col} vs {x_col}（按学科分类）', fontsize=14)
-        ax.legend(loc='upper left', fontsize=8, ncol=2)
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        fname = f"学科_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
-        fig.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches='tight')
-        plt.close(fig)
+            fig, ax = plt.subplots(figsize=(14, 10))
+            other = stats[stats['院系'] != dept]
+            ax.scatter(other[x_col], other[y_col],
+                       c='lightgray', s=25, alpha=0.5, edgecolors='gray',
+                       linewidths=0.3, label='其他系', zorder=1)
 
-        # --- 按特聘/非特聘分色散点图 ---
-        fig, ax = plt.subplots(figsize=(16, 11))
-        for is_t, lbl, clr, sz in [(False, '非特聘教师', 'steelblue', 40),
-                                     (True, '特聘教师', 'red', 80)]:
-            sub = stats[stats['是否特聘'] == is_t]
-            ax.scatter(sub[x_col], sub[y_col], c=clr, s=sz,
-                       alpha=0.55 if not is_t else 0.85,
-                       label=lbl, edgecolors='gray', linewidths=0.3,
-                       zorder=2 if not is_t else 3)
+            sub = stats[stats['院系'] == dept]
+            color = DEPT_COLOR_MAP[dept]
+            ax.scatter(sub[x_col], sub[y_col], c=color, s=70, alpha=0.85,
+                       edgecolors='black', linewidths=0.5, label=dept, zorder=2)
             for _, r in sub.iterrows():
                 ax.annotate(r['姓名'], (r[x_col], r[y_col]),
-                            fontsize=5, alpha=0.65, xytext=(3, 3),
+                            fontsize=7, alpha=0.8, xytext=(4, 4),
+                            textcoords='offset points',
+                            color=color, fontweight='bold')
+
+            ax.set_xlabel(x_col, fontsize=12)
+            ax.set_ylabel(y_col, fontsize=12)
+            ax.set_title(f'{dept}系 — {y_col} vs {x_col}', fontsize=14)
+            ax.legend(loc='upper left', fontsize=10)
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            fname = f"{dept}_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
+            fig.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            total_charts += 1
+
+        # --- 三系总览图（三种颜色区分） ---
+        fig, ax = plt.subplots(figsize=(14, 10))
+        for dept in departments:
+            sub = stats[stats['院系'] == dept]
+            color = DEPT_COLOR_MAP[dept]
+            ax.scatter(sub[x_col], sub[y_col], c=color, s=50, alpha=0.7,
+                       edgecolors='gray', linewidths=0.3, label=dept, zorder=2)
+            for _, r in sub.iterrows():
+                ax.annotate(r['姓名'], (r[x_col], r[y_col]),
+                            fontsize=5, alpha=0.6, xytext=(3, 3),
                             textcoords='offset points')
         ax.set_xlabel(x_col, fontsize=12)
         ax.set_ylabel(y_col, fontsize=12)
-        ax.set_title(f'{y_col} vs {x_col}（特聘 vs 非特聘）', fontsize=14)
+        ax.set_title(f'{y_col} vs {x_col}（三系总览）', fontsize=14)
         ax.legend(loc='upper left', fontsize=10)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
-        fname = f"特聘_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
+        fname = f"总览_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
         fig.savefig(os.path.join(output_dir, fname), dpi=150, bbox_inches='tight')
         plt.close(fig)
+        total_charts += 1
 
-    print(f"  散点图已保存: {len(DEPT_SCATTER_CONFIGS) * 2} 张")
+    print(f"  散点图已保存: {total_charts} 张")
 
 
 def draw_talent_comparison(all_stats, dept_info, output_dir):
-    """绘制特聘 vs 非特聘对比图（文章和经费）"""
+    """绘制特聘 vs 非特聘对比图（文章和经费），只考虑三个系"""
     os.makedirs(output_dir, exist_ok=True)
     stats = all_stats.copy()
+    stats = stats[stats['姓名'].isin(dept_info)]
     stats['类别'] = stats['姓名'].map(
-        lambda n: '特聘' if dept_info.get(n, {}).get('是否特聘', False) else '非特聘')
+        lambda n: '特聘' if dept_info[n]['是否特聘'] else '非特聘')
 
     talent = stats[stats['类别'] == '特聘']
     non_talent = stats[stats['类别'] == '非特聘']
@@ -1138,35 +1194,26 @@ def draw_talent_comparison(all_stats, dept_info, output_dir):
 
 
 def compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df):
-    """按院系和年份统计经费（近五年）"""
+    """按院系和年份统计经费（近五年），只考虑三个系"""
     five_year_start = current_year - RECENT_YEARS + 1
     years = list(range(five_year_start, current_year + 1))
 
-    teacher_dept = {}
-    for _, row in teachers_df.iterrows():
-        name = str(row['姓名'])
-        dept = row.get('一级学科', '')
-        if pd.isna(dept) or str(dept).strip() in ('', 'nan'):
-            dept = '未知'
-        else:
-            dept = str(dept).strip()
-        teacher_dept[name] = dept
-
+    teacher_dept = _get_teacher_dept_map(teachers_df)
     teacher_names_set = set(teacher_dept.keys())
 
     v = vertical_df.copy()
     v['_year'] = v['立项日期'].apply(extract_date_year)
     v['_funding'] = v['批准经费'].apply(clean_funding)
     v = v[v['负责人'].isin(teacher_names_set)].copy()
-    v['一级学科'] = v['负责人'].map(teacher_dept)
+    v['院系'] = v['负责人'].map(teacher_dept)
 
     h = horizontal_df.copy()
     h['_year'] = h['立项日期'].apply(extract_date_year)
     h['_funding'] = h['批准经费'].apply(clean_funding)
     h = h[h['负责人'].isin(teacher_names_set)].copy()
-    h['一级学科'] = h['负责人'].map(teacher_dept)
+    h['院系'] = h['负责人'].map(teacher_dept)
 
-    departments = sorted(set(teacher_dept.values()))
+    departments = VALID_DEPARTMENTS
     results = []
     for year in years:
         for dept in departments + ['总计']:
@@ -1174,12 +1221,12 @@ def compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df):
                 vy = v[v['_year'] == year]
                 hy = h[h['_year'] == year]
             else:
-                vy = v[(v['_year'] == year) & (v['一级学科'] == dept)]
-                hy = h[(h['_year'] == year) & (h['一级学科'] == dept)]
+                vy = v[(v['_year'] == year) & (v['院系'] == dept)]
+                hy = h[(h['_year'] == year) & (h['院系'] == dept)]
             vf = vy['_funding'].sum()
             hf = hy['_funding'].sum()
             results.append({
-                '年份': year, '一级学科': dept,
+                '年份': year, '院系': dept,
                 '纵向经费': round(vf, 2), '横向经费': round(hf, 2),
                 '总经费': round(vf + hf, 2),
             })
@@ -1187,19 +1234,11 @@ def compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df):
 
 
 def compute_yearly_papers_by_dept(teachers_df, papers_df):
-    """按院系和年份统计文章数量（使用成果归属学者快速匹配）"""
+    """按院系和年份统计文章数量（使用成果归属学者快速匹配），只考虑三个系"""
     five_year_start = current_year - RECENT_YEARS + 1
     years = list(range(five_year_start, current_year + 1))
 
-    teacher_dept = {}
-    for _, row in teachers_df.iterrows():
-        name = str(row['姓名'])
-        dept = row.get('一级学科', '')
-        if pd.isna(dept) or str(dept).strip() in ('', 'nan'):
-            dept = '未知'
-        else:
-            dept = str(dept).strip()
-        teacher_dept[name] = dept
+    teacher_dept = _get_teacher_dept_map(teachers_df)
 
     papers = papers_df.copy()
     papers['_year'] = papers['年'].apply(extract_year)
@@ -1223,16 +1262,16 @@ def compute_yearly_papers_by_dept(teachers_df, papers_df):
         if matched_depts:
             total_year_counts[yr] = total_year_counts.get(yr, 0) + 1
 
-    departments = sorted(set(teacher_dept.values()))
+    departments = VALID_DEPARTMENTS
     results = []
     for year in years:
         for dept in departments:
             results.append({
-                '年份': year, '一级学科': dept,
+                '年份': year, '院系': dept,
                 '文章数量': dept_year_counts.get((dept, year), 0),
             })
         results.append({
-            '年份': year, '一级学科': '总计',
+            '年份': year, '院系': '总计',
             '文章数量': total_year_counts.get(year, 0),
         })
     return pd.DataFrame(results)
@@ -1241,12 +1280,14 @@ def compute_yearly_papers_by_dept(teachers_df, papers_df):
 def draw_yearly_funding_chart(yearly_funding, output_dir):
     """绘制近五年经费变化折线图（总经费/纵向/横向，分院系+总计）"""
     os.makedirs(output_dir, exist_ok=True)
-    groups = sorted(yearly_funding['一级学科'].unique())
+    groups = list(yearly_funding['院系'].unique())
+    # 确保总计在最后
     if '总计' in groups:
         groups.remove('总计')
-        groups.append('总计')
+    groups = sorted(groups) + ['总计']
 
-    color_map = {d: DEPT_COLORS[i % len(DEPT_COLORS)] for i, d in enumerate(groups) if d != '总计'}
+    color_map = {d: DEPT_COLOR_MAP.get(d, DEPT_COLORS[i % len(DEPT_COLORS)])
+                 for i, d in enumerate(groups) if d != '总计'}
     color_map['总计'] = 'black'
 
     fig, axes = plt.subplots(1, 3, figsize=(22, 7), sharey=False)
@@ -1254,7 +1295,7 @@ def draw_yearly_funding_chart(yearly_funding, output_dir):
             ['总经费', '纵向经费', '横向经费'],
             ['总经费变化', '纵向经费变化', '横向经费变化']):
         for dept in groups:
-            sub = yearly_funding[yearly_funding['一级学科'] == dept].sort_values('年份')
+            sub = yearly_funding[yearly_funding['院系'] == dept].sort_values('年份')
             if dept == '总计':
                 style = dict(linewidth=3, marker='s', markersize=8)
             else:
@@ -1280,17 +1321,18 @@ def draw_yearly_funding_chart(yearly_funding, output_dir):
 def draw_yearly_paper_chart(yearly_papers, output_dir):
     """绘制近五年文章数量变化折线图（分院系+总计）"""
     os.makedirs(output_dir, exist_ok=True)
-    groups = sorted(yearly_papers['一级学科'].unique())
+    groups = list(yearly_papers['院系'].unique())
     if '总计' in groups:
         groups.remove('总计')
-        groups.append('总计')
+    groups = sorted(groups) + ['总计']
 
-    color_map = {d: DEPT_COLORS[i % len(DEPT_COLORS)] for i, d in enumerate(groups) if d != '总计'}
+    color_map = {d: DEPT_COLOR_MAP.get(d, DEPT_COLORS[i % len(DEPT_COLORS)])
+                 for i, d in enumerate(groups) if d != '总计'}
     color_map['总计'] = 'black'
 
     fig, ax = plt.subplots(figsize=(12, 7))
     for dept in groups:
-        sub = yearly_papers[yearly_papers['一级学科'] == dept].sort_values('年份')
+        sub = yearly_papers[yearly_papers['院系'] == dept].sort_values('年份')
         if dept == '总计':
             style = dict(linewidth=3, marker='s', markersize=8)
         else:
@@ -1321,13 +1363,14 @@ def generate_department_report(all_stats, dept_info, comparison,
     lines.append(f"# 院系整体统计报告\n")
     lines.append(f"生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     lines.append(f"近五年范围：{current_year - RECENT_YEARS + 1}—{current_year}\n")
+    lines.append(f"统计院系：{'、'.join(VALID_DEPARTMENTS)}\n")
 
     # 基本概况
     total_teachers = len(all_stats)
     lines.append("## 基本概况\n")
     lines.append("| 指标 | 数值 |")
     lines.append("|------|------|")
-    lines.append(f"| 教师总数 | {total_teachers} |")
+    lines.append(f"| 教师总数（三系） | {total_teachers} |")
     lines.append(f"| 特聘教师数 | {comparison['talent_count']} |")
     lines.append(f"| 非特聘教师数 | {comparison['non_talent_count']} |")
     lines.append(f"| 全院人均总文章数 | {all_stats['总文章数量'].mean():.2f} |")
@@ -1335,6 +1378,20 @@ def generate_department_report(all_stats, dept_info, comparison,
     lines.append(f"| 全院人均生涯总经费（万元） | {all_stats['生涯总经费(万元)'].mean():.2f} |")
     lines.append(f"| 全院人均近五年经费（万元） | {all_stats['近五年总经费(万元)'].mean():.2f} |")
     lines.append("")
+
+    # 分系概况
+    stats_with_dept = all_stats.copy()
+    stats_with_dept['院系'] = stats_with_dept['姓名'].map(lambda n: dept_info.get(n, {}).get('院系', ''))
+    for dept in VALID_DEPARTMENTS:
+        sub = stats_with_dept[stats_with_dept['院系'] == dept]
+        if len(sub) > 0:
+            lines.append(f"### {dept}系\n")
+            lines.append(f"- 教师人数：{len(sub)}")
+            lines.append(f"- 人均总文章数：{sub['总文章数量'].mean():.2f}")
+            lines.append(f"- 人均近五年文章数：{sub['近五年文章数量'].mean():.2f}")
+            lines.append(f"- 人均生涯总经费：{sub['生涯总经费(万元)'].mean():.2f} 万元")
+            lines.append(f"- 人均近五年经费：{sub['近五年总经费(万元)'].mean():.2f} 万元")
+            lines.append("")
 
     # 特聘对比
     lines.append("## 特聘 vs 非特聘 对比\n")
@@ -1352,21 +1409,24 @@ def generate_department_report(all_stats, dept_info, comparison,
     # 散点图
     lines.append("## 散点图分布\n")
     for x_col, y_col in DEPT_SCATTER_CONFIGS:
-        fname_dept = f"学科_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
-        fname_talent = f"特聘_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
-        lines.append(f"### {y_col} vs {x_col}（按学科）\n")
-        lines.append(f"![{y_col} vs {x_col} 按学科]({fname_dept})\n")
-        lines.append(f"### {y_col} vs {x_col}（特聘 vs 非特聘）\n")
-        lines.append(f"![{y_col} vs {x_col} 特聘]({fname_talent})\n")
+        # 总览图
+        fname_all = f"总览_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
+        lines.append(f"### {y_col} vs {x_col}（三系总览）\n")
+        lines.append(f"![三系总览]({fname_all})\n")
+        # 各系图
+        for dept in VALID_DEPARTMENTS:
+            fname = f"{dept}_{y_col}_vs_{x_col}.png".replace('/', '_').replace('(', '').replace(')', '')
+            lines.append(f"### {y_col} vs {x_col}（{dept}系）\n")
+            lines.append(f"![{dept}系]({fname})\n")
 
     # 经费趋势
     lines.append("## 近五年经费变化趋势\n")
     lines.append("![近五年经费变化趋势](近五年经费变化趋势.png)\n")
     lines.append("### 经费数据明细（总经费，万元）\n")
     pivot_f = yearly_funding.pivot_table(
-        index='一级学科', columns='年份', values='总经费', aggfunc='sum').fillna(0)
+        index='院系', columns='年份', values='总经费', aggfunc='sum').fillna(0)
     year_cols = sorted(pivot_f.columns)
-    header = "| 一级学科 | " + " | ".join(str(int(y)) for y in year_cols) + " |"
+    header = "| 院系 | " + " | ".join(str(int(y)) for y in year_cols) + " |"
     sep = "|------|" + "|".join(["------"] * len(year_cols)) + "|"
     lines.append(header)
     lines.append(sep)
@@ -1380,9 +1440,9 @@ def generate_department_report(all_stats, dept_info, comparison,
     lines.append("![近五年文章数量变化趋势](近五年文章数量变化趋势.png)\n")
     lines.append("### 文章数据明细\n")
     pivot_p = yearly_papers.pivot_table(
-        index='一级学科', columns='年份', values='文章数量', aggfunc='sum').fillna(0)
+        index='院系', columns='年份', values='文章数量', aggfunc='sum').fillna(0)
     year_cols_p = sorted(pivot_p.columns)
-    header = "| 一级学科 | " + " | ".join(str(int(y)) for y in year_cols_p) + " |"
+    header = "| 院系 | " + " | ".join(str(int(y)) for y in year_cols_p) + " |"
     sep = "|------|" + "|".join(["------"] * len(year_cols_p)) + "|"
     lines.append(header)
     lines.append(sep)
@@ -1410,6 +1470,7 @@ def run_department_stats(file_paths=None, output_path=None):
 
     print("=" * 60)
     print("开始院系整体统计分析")
+    print(f"统计院系：{'、'.join(VALID_DEPARTMENTS)}")
     print(f"当前年份：{current_year}，近五年范围：{current_year - RECENT_YEARS + 1}-{current_year}")
     print("=" * 60)
 
@@ -1424,6 +1485,9 @@ def run_department_stats(file_paths=None, output_path=None):
     teachers_df = filter_teachers(people_df)
     papers_cleaned = deduplicate_papers(papers_df)
 
+    # 构建教师院系映射
+    teacher_dept_map = _get_teacher_dept_map(teachers_df)
+
     # 2. 文章/经费统计（利用缓存）
     cached_paper_hash = read_hash_from_csv(paper_csv)
     cached_funding_hash = read_hash_from_csv(funding_csv)
@@ -1436,23 +1500,42 @@ def run_department_stats(file_paths=None, output_path=None):
         funding_stats = load_csv_with_hash(funding_csv)
         if not EXPECTED_PAPER_COLS.issubset(paper_stats.columns):
             paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
+            paper_stats['院系'] = paper_stats['姓名'].map(teacher_dept_map).fillna('')
             save_csv_with_hash(paper_stats, paper_csv, data_hash)
+        elif '院系' not in paper_stats.columns:
+            paper_stats['院系'] = paper_stats['姓名'].map(teacher_dept_map).fillna('')
+            save_csv_with_hash(paper_stats, paper_csv, data_hash)
+        if '院系' not in funding_stats.columns:
+            funding_stats['院系'] = funding_stats['姓名'].map(teacher_dept_map).fillna('')
+            save_csv_with_hash(funding_stats, funding_csv, data_hash)
     else:
         print("计算统计数据（首次或数据已更新）...")
         paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
+        paper_stats['院系'] = paper_stats['姓名'].map(teacher_dept_map).fillna('')
         save_csv_with_hash(paper_stats, paper_csv, data_hash)
         funding_stats = compute_funding_stats(teachers_df, vertical_df, horizontal_df)
+        funding_stats['院系'] = funding_stats['姓名'].map(teacher_dept_map).fillna('')
         save_csv_with_hash(funding_stats, funding_csv, data_hash)
 
-    all_stats = paper_stats.merge(funding_stats, on='姓名', how='outer').fillna(0)
+    all_stats = paper_stats.merge(funding_stats, on='姓名', how='outer', suffixes=('', '_dup')).fillna(0)
+    # 解决合并后可能出现的重复院系列
+    if '院系_dup' in all_stats.columns:
+        all_stats.drop(columns=['院系_dup'], inplace=True)
+
     dept_info = _get_dept_talent_info(teachers_df, talent_df)
+
+    # 只保留三个系的教师统计
+    dept_stats = all_stats[all_stats['姓名'].isin(dept_info)].copy()
+    print(f"三系教师总数: {len(dept_stats)}（天文: {sum(1 for v in dept_info.values() if v['院系']=='天文')}，"
+          f"物理: {sum(1 for v in dept_info.values() if v['院系']=='物理')}，"
+          f"核科学与技术: {sum(1 for v in dept_info.values() if v['院系']=='核科学与技术')}）")
 
     # 3. 绘制图表
     print("生成散点图...")
-    draw_department_scatters(all_stats, dept_info, str(dept_output))
+    draw_department_scatters(dept_stats, dept_info, str(dept_output))
 
     print("生成特聘对比图...")
-    comparison = draw_talent_comparison(all_stats, dept_info, str(dept_output))
+    comparison = draw_talent_comparison(dept_stats, dept_info, str(dept_output))
 
     print("计算并绘制年度经费趋势...")
     yearly_funding = compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df)
@@ -1467,11 +1550,11 @@ def run_department_stats(file_paths=None, output_path=None):
                           index=False, encoding='utf-8-sig')
     yearly_papers.to_csv(os.path.join(str(dept_output), '年度文章统计.csv'),
                          index=False, encoding='utf-8-sig')
-    all_stats.to_csv(os.path.join(str(dept_output), '教师综合统计.csv'),
-                     index=False, encoding='utf-8-sig')
+    dept_stats.to_csv(os.path.join(str(dept_output), '教师综合统计.csv'),
+                      index=False, encoding='utf-8-sig')
 
     print("生成统计报告...")
-    generate_department_report(all_stats, dept_info, comparison,
+    generate_department_report(dept_stats, dept_info, comparison,
                                yearly_funding, yearly_papers, str(dept_output))
 
     print("=" * 60)
