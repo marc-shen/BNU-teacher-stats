@@ -146,7 +146,8 @@ def load_csv_with_hash(csv_path):
 # 期望的文章统计列（用于检测缓存是否需要更新）
 EXPECTED_PAPER_COLS = {'第一作者文章数量', '近五年第一作者文章数量',
                        '第一署名单位文章数量', '近五年第一署名单位文章数量',
-                       '通讯作者文章数量', '近五年通讯作者文章数量'}
+                       '通讯作者文章数量', '近五年通讯作者文章数量',
+                       '主要作者文章数量', '近五年主要作者文章数量'}
 
 
 def load_or_compute_stats(file_paths=None, output_path=None):
@@ -444,10 +445,12 @@ def match_papers_for_teachers(teachers_df, papers_df):
         first_author_papers = 0
         first_order_papers = 0
         corresponding_papers = 0
+        primary_author_papers = 0
         recent_papers = 0
         recent_first_author_papers = 0
         recent_first_order_papers = 0
         recent_corresponding_papers = 0
+        recent_primary_author_papers = 0
 
         if not formats:
             results.append({
@@ -456,10 +459,12 @@ def match_papers_for_teachers(teachers_df, papers_df):
                 '第一作者文章数量': 0,
                 '第一署名单位文章数量': 0,
                 '通讯作者文章数量': 0,
+                '主要作者文章数量': 0,
                 '近五年文章数量': 0,
                 '近五年第一作者文章数量': 0,
                 '近五年第一署名单位文章数量': 0,
                 '近五年通讯作者文章数量': 0,
+                '近五年主要作者文章数量': 0,
             })
             continue
 
@@ -505,6 +510,8 @@ def match_papers_for_teachers(teachers_df, papers_df):
                 first_order_papers += 1
             if is_corresponding:
                 corresponding_papers += 1
+            if is_first_author or is_corresponding:
+                primary_author_papers += 1
 
             if year is not None and five_year_start <= year <= recent_year_end:
                 recent_papers += 1
@@ -514,6 +521,8 @@ def match_papers_for_teachers(teachers_df, papers_df):
                     recent_first_order_papers += 1
                 if is_corresponding:
                     recent_corresponding_papers += 1
+                if is_first_author or is_corresponding:
+                    recent_primary_author_papers += 1
 
         results.append({
             '姓名': name,
@@ -521,10 +530,12 @@ def match_papers_for_teachers(teachers_df, papers_df):
             '第一作者文章数量': first_author_papers,
             '第一署名单位文章数量': first_order_papers,
             '通讯作者文章数量': corresponding_papers,
+            '主要作者文章数量': primary_author_papers,
             '近五年文章数量': recent_papers,
             '近五年第一作者文章数量': recent_first_author_papers,
             '近五年第一署名单位文章数量': recent_first_order_papers,
             '近五年通讯作者文章数量': recent_corresponding_papers,
+            '近五年主要作者文章数量': recent_primary_author_papers,
         })
 
     print(f"文章匹配完成，共{len(results)}位教师。")
@@ -671,18 +682,22 @@ SCATTER_CONFIGS = [
     ('生涯总经费(万元)', '第一作者文章数量'),
     ('生涯总经费(万元)', '第一署名单位文章数量'),
     ('生涯总经费(万元)', '通讯作者文章数量'),
+    ('生涯总经费(万元)', '主要作者文章数量'),
     ('生涯总经费(万元)', '近五年文章数量'),
     ('生涯总经费(万元)', '近五年第一作者文章数量'),
     ('生涯总经费(万元)', '近五年第一署名单位文章数量'),
     ('生涯总经费(万元)', '近五年通讯作者文章数量'),
+    ('生涯总经费(万元)', '近五年主要作者文章数量'),
     ('近五年总经费(万元)', '总文章数量'),
     ('近五年总经费(万元)', '第一作者文章数量'),
     ('近五年总经费(万元)', '第一署名单位文章数量'),
     ('近五年总经费(万元)', '通讯作者文章数量'),
+    ('近五年总经费(万元)', '主要作者文章数量'),
     ('近五年总经费(万元)', '近五年文章数量'),
     ('近五年总经费(万元)', '近五年第一作者文章数量'),
     ('近五年总经费(万元)', '近五年第一署名单位文章数量'),
     ('近五年总经费(万元)', '近五年通讯作者文章数量'),
+    ('近五年总经费(万元)', '近五年主要作者文章数量'),
 ]
 
 
@@ -837,19 +852,23 @@ def generate_individual_report(name, paper_stats, funding_stats, teacher_info, o
         lines.append(f"| 第一作者文章数量 | {int(pr['第一作者文章数量'])} |")
         lines.append(f"| 第一署名单位文章数量 | {int(pr['第一署名单位文章数量'])} |")
         lines.append(f"| 通讯作者文章数量 | {int(pr['通讯作者文章数量'])} |")
+        lines.append(f"| 主要作者文章数量 | {int(pr['主要作者文章数量'])} |")
         lines.append(f"| 近五年文章数量 | {int(pr['近五年文章数量'])} |")
         lines.append(f"| 近五年第一作者文章数量 | {int(pr['近五年第一作者文章数量'])} |")
         lines.append(f"| 近五年第一署名单位文章数量 | {int(pr['近五年第一署名单位文章数量'])} |")
         lines.append(f"| 近五年通讯作者文章数量 | {int(pr['近五年通讯作者文章数量'])} |")
+        lines.append(f"| 近五年主要作者文章数量 | {int(pr['近五年主要作者文章数量'])} |")
     else:
         lines.append(f"| 总文章数量 | 0 |")
         lines.append(f"| 第一作者文章数量 | 0 |")
         lines.append(f"| 第一署名单位文章数量 | 0 |")
         lines.append(f"| 通讯作者文章数量 | 0 |")
+        lines.append(f"| 主要作者文章数量 | 0 |")
         lines.append(f"| 近五年文章数量 | 0 |")
         lines.append(f"| 近五年第一作者文章数量 | 0 |")
         lines.append(f"| 近五年第一署名单位文章数量 | 0 |")
         lines.append(f"| 近五年通讯作者文章数量 | 0 |")
+        lines.append(f"| 近五年主要作者文章数量 | 0 |")
     lines.append("")
 
     lines.append("## 项目经费统计\n")
@@ -914,8 +933,8 @@ def generate_comparison_report(names, paper_stats, funding_stats, teacher_infos,
     lines.append("## 文章统计对比\n")
     lines.append(header)
     lines.append(sep)
-    paper_fields = ['总文章数量', '第一作者文章数量', '第一署名单位文章数量', '通讯作者文章数量',
-                    '近五年文章数量', '近五年第一作者文章数量', '近五年第一署名单位文章数量', '近五年通讯作者文章数量']
+    paper_fields = ['总文章数量', '第一作者文章数量', '第一署名单位文章数量', '通讯作者文章数量', '主要作者文章数量',
+                    '近五年文章数量', '近五年第一作者文章数量', '近五年第一署名单位文章数量', '近五年通讯作者文章数量', '近五年主要作者文章数量']
     for field in paper_fields:
         vals = []
         for n in names:
@@ -1040,18 +1059,22 @@ DEPT_SCATTER_CONFIGS = [
     ('生涯总经费(万元)', '第一作者文章数量'),
     ('生涯总经费(万元)', '第一署名单位文章数量'),
     ('生涯总经费(万元)', '通讯作者文章数量'),
+    ('生涯总经费(万元)', '主要作者文章数量'),
     ('生涯总经费(万元)', '近五年文章数量'),
     ('生涯总经费(万元)', '近五年第一作者文章数量'),
     ('生涯总经费(万元)', '近五年第一署名单位文章数量'),
     ('生涯总经费(万元)', '近五年通讯作者文章数量'),
+    ('生涯总经费(万元)', '近五年主要作者文章数量'),
     ('近五年总经费(万元)', '总文章数量'),
     ('近五年总经费(万元)', '第一作者文章数量'),
     ('近五年总经费(万元)', '第一署名单位文章数量'),
     ('近五年总经费(万元)', '通讯作者文章数量'),
+    ('近五年总经费(万元)', '主要作者文章数量'),
     ('近五年总经费(万元)', '近五年文章数量'),
     ('近五年总经费(万元)', '近五年第一作者文章数量'),
     ('近五年总经费(万元)', '近五年第一署名单位文章数量'),
     ('近五年总经费(万元)', '近五年通讯作者文章数量'),
+    ('近五年总经费(万元)', '近五年主要作者文章数量'),
 ]
 
 DEPT_COLOR_MAP = {
