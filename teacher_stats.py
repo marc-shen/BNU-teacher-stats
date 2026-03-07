@@ -314,7 +314,13 @@ def extract_year(year_str):
 def match_papers_for_teachers(teachers_df, papers_df):
     """
     为所有老师匹配文章，返回统计结果DataFrame。
-    列：姓名, 总文章数量, 第一署名单位文章数量, 通讯作者文章数量, 近五年文章数量, 近五年第一署名单位文章数量, 近五年通讯作者文章数量
+    匹配规则：
+      - 文章归属：中文名出现在"成果归属学者"列
+      - 第一作者：英文名出现在"作者"列第一个作者位置（首个分号之前）
+      - 通讯作者：英文名出现在"通讯作者"列，或中文名出现在"通讯作者归属"列
+      - 第一署名单位："本机构署名顺序"列为"第一署名顺序"
+    列：姓名, 总文章数量, 第一作者文章数量, 第一署名单位文章数量, 通讯作者文章数量,
+        近五年文章数量, 近五年第一作者文章数量, 近五年第一署名单位文章数量, 近五年通讯作者文章数量
     """
     print("开始匹配文章...")
 
@@ -329,13 +335,19 @@ def match_papers_for_teachers(teachers_df, papers_df):
     papers_df = papers_df.copy()
     papers_df['_year'] = papers_df['年'].apply(extract_year)
 
-    # 预处理作者和成果归属学者字段
-    author_col_vals = papers_df['作者'].fillna('').str.lower().tolist()
+    # 预处理各列
     scholar_col_vals = papers_df['成果归属学者'].fillna('').tolist()
+    author_col_vals = papers_df['作者'].fillna('').str.lower().tolist()
     order_col_vals = papers_df['本机构署名顺序'].fillna('').tolist()
     corresponding_col_vals = papers_df['通讯作者'].fillna('').str.lower().tolist()
-    corresponding_unit_col_vals = papers_df['通讯作者单位'].fillna('').str.lower().tolist()
+    corresponding_belong_vals = papers_df['通讯作者归属'].fillna('').tolist()
     year_vals = papers_df['_year'].tolist()
+
+    # 预提取作者列第一个作者（分号前的部分）用于第一作者判断
+    first_author_vals = []
+    for a in author_col_vals:
+        first_part = a.split(';')[0].strip() if a else ''
+        first_author_vals.append(first_part)
 
     five_year_start, recent_year_end = _recent_year_range()
 
@@ -346,9 +358,11 @@ def match_papers_for_teachers(teachers_df, papers_df):
             print(f"  匹配进度: {i+1}/{total}")
 
         total_papers = 0
+        first_author_papers = 0
         first_order_papers = 0
         corresponding_papers = 0
         recent_papers = 0
+        recent_first_author_papers = 0
         recent_first_order_papers = 0
         recent_corresponding_papers = 0
 
@@ -356,9 +370,11 @@ def match_papers_for_teachers(teachers_df, papers_df):
             results.append({
                 '姓名': name,
                 '总文章数量': 0,
+                '第一作者文章数量': 0,
                 '第一署名单位文章数量': 0,
                 '通讯作者文章数量': 0,
                 '近五年文章数量': 0,
+                '近五年第一作者文章数量': 0,
                 '近五年第一署名单位文章数量': 0,
                 '近五年通讯作者文章数量': 0,
             })
@@ -367,59 +383,63 @@ def match_papers_for_teachers(teachers_df, papers_df):
         formats_lower = [f.lower() for f in formats if f]
 
         for j in range(len(papers_df)):
-            author_str = author_col_vals[j]
             scholar_str = scholar_col_vals[j]
 
-            # 检查是否匹配（在作者或成果归属学者中查找拼音格式，或中文名直接在成果归属学者中）
-            matched = False
-            if name in scholar_str:
-                matched = True
+            # 只通过"成果归属学者"列匹配（中文名）
+            if name not in scholar_str:
+                continue
+
+            total_papers += 1
+            year = year_vals[j]
+
+            # 第一署名单位
+            is_first_order = (order_col_vals[j] == '第一署名顺序')
+
+            # 第一作者：英文名出现在作者列第一个作者位置
+            is_first_author = False
+            first_a = first_author_vals[j]
+            for fmt in formats_lower:
+                if fmt in first_a:
+                    is_first_author = True
+                    break
+
+            # 通讯作者：英文名在"通讯作者"列 或 中文名在"通讯作者归属"列
+            corr_str = corresponding_col_vals[j]
+            corr_belong_str = corresponding_belong_vals[j]
+            is_corresponding = False
+            if name in corr_belong_str:
+                is_corresponding = True
             else:
                 for fmt in formats_lower:
-                    if fmt in author_str:
-                        matched = True
-                        break
-                    if fmt in scholar_str.lower():
-                        matched = True
+                    fmt_no_dot = fmt.replace('.', '')
+                    if fmt in corr_str or fmt_no_dot in corr_str:
+                        is_corresponding = True
                         break
 
-            if matched:
-                total_papers += 1
-                is_first = (order_col_vals[j] == '第一署名顺序')
-                year = year_vals[j]
+            if is_first_author:
+                first_author_papers += 1
+            if is_first_order:
+                first_order_papers += 1
+            if is_corresponding:
+                corresponding_papers += 1
 
-                # 判断是否为通讯作者（匹配通讯作者列或通讯作者单位列）
-                corr_str = corresponding_col_vals[j]
-                corr_unit_str = corresponding_unit_col_vals[j]
-                is_corresponding = False
-                if name in corr_str or name in corr_unit_str:
-                    is_corresponding = True
-                else:
-                    for fmt in formats_lower:
-                        fmt_no_dot = fmt.replace('.', '')
-                        if fmt in corr_str or fmt in corr_unit_str \
-                                or fmt_no_dot in corr_str or fmt_no_dot in corr_unit_str:
-                            is_corresponding = True
-                            break
-
-                if is_first:
-                    first_order_papers += 1
+            if year is not None and five_year_start <= year <= recent_year_end:
+                recent_papers += 1
+                if is_first_author:
+                    recent_first_author_papers += 1
+                if is_first_order:
+                    recent_first_order_papers += 1
                 if is_corresponding:
-                    corresponding_papers += 1
-
-                if year is not None and five_year_start <= year <= recent_year_end:
-                    recent_papers += 1
-                    if is_first:
-                        recent_first_order_papers += 1
-                    if is_corresponding:
-                        recent_corresponding_papers += 1
+                    recent_corresponding_papers += 1
 
         results.append({
             '姓名': name,
             '总文章数量': total_papers,
+            '第一作者文章数量': first_author_papers,
             '第一署名单位文章数量': first_order_papers,
             '通讯作者文章数量': corresponding_papers,
             '近五年文章数量': recent_papers,
+            '近五年第一作者文章数量': recent_first_author_papers,
             '近五年第一署名单位文章数量': recent_first_order_papers,
             '近五年通讯作者文章数量': recent_corresponding_papers,
         })
@@ -565,15 +585,19 @@ def get_teacher_info(name, people_df, talent_df):
 # ============================================================
 SCATTER_CONFIGS = [
     ('生涯总经费(万元)', '总文章数量'),
+    ('生涯总经费(万元)', '第一作者文章数量'),
     ('生涯总经费(万元)', '第一署名单位文章数量'),
     ('生涯总经费(万元)', '通讯作者文章数量'),
     ('生涯总经费(万元)', '近五年文章数量'),
+    ('生涯总经费(万元)', '近五年第一作者文章数量'),
     ('生涯总经费(万元)', '近五年第一署名单位文章数量'),
     ('生涯总经费(万元)', '近五年通讯作者文章数量'),
     ('近五年总经费(万元)', '总文章数量'),
+    ('近五年总经费(万元)', '第一作者文章数量'),
     ('近五年总经费(万元)', '第一署名单位文章数量'),
     ('近五年总经费(万元)', '通讯作者文章数量'),
     ('近五年总经费(万元)', '近五年文章数量'),
+    ('近五年总经费(万元)', '近五年第一作者文章数量'),
     ('近五年总经费(万元)', '近五年第一署名单位文章数量'),
     ('近五年总经费(万元)', '近五年通讯作者文章数量'),
 ]
@@ -727,16 +751,20 @@ def generate_individual_report(name, paper_stats, funding_stats, teacher_info, o
     if len(p) > 0:
         pr = p.iloc[0]
         lines.append(f"| 总文章数量 | {int(pr['总文章数量'])} |")
+        lines.append(f"| 第一作者文章数量 | {int(pr['第一作者文章数量'])} |")
         lines.append(f"| 第一署名单位文章数量 | {int(pr['第一署名单位文章数量'])} |")
         lines.append(f"| 通讯作者文章数量 | {int(pr['通讯作者文章数量'])} |")
         lines.append(f"| 近五年文章数量 | {int(pr['近五年文章数量'])} |")
+        lines.append(f"| 近五年第一作者文章数量 | {int(pr['近五年第一作者文章数量'])} |")
         lines.append(f"| 近五年第一署名单位文章数量 | {int(pr['近五年第一署名单位文章数量'])} |")
         lines.append(f"| 近五年通讯作者文章数量 | {int(pr['近五年通讯作者文章数量'])} |")
     else:
         lines.append(f"| 总文章数量 | 0 |")
+        lines.append(f"| 第一作者文章数量 | 0 |")
         lines.append(f"| 第一署名单位文章数量 | 0 |")
         lines.append(f"| 通讯作者文章数量 | 0 |")
         lines.append(f"| 近五年文章数量 | 0 |")
+        lines.append(f"| 近五年第一作者文章数量 | 0 |")
         lines.append(f"| 近五年第一署名单位文章数量 | 0 |")
         lines.append(f"| 近五年通讯作者文章数量 | 0 |")
     lines.append("")
@@ -803,7 +831,8 @@ def generate_comparison_report(names, paper_stats, funding_stats, teacher_infos,
     lines.append("## 文章统计对比\n")
     lines.append(header)
     lines.append(sep)
-    paper_fields = ['总文章数量', '第一署名单位文章数量', '通讯作者文章数量', '近五年文章数量', '近五年第一署名单位文章数量', '近五年通讯作者文章数量']
+    paper_fields = ['总文章数量', '第一作者文章数量', '第一署名单位文章数量', '通讯作者文章数量',
+                    '近五年文章数量', '近五年第一作者文章数量', '近五年第一署名单位文章数量', '近五年通讯作者文章数量']
     for field in paper_fields:
         vals = []
         for n in names:
@@ -889,7 +918,9 @@ def main(teacher_names=None, file_paths=None, output_path=None):
     cached_paper_hash = read_hash_from_csv(paper_csv)
     cached_funding_hash = read_hash_from_csv(funding_csv)
 
-    EXPECTED_PAPER_COLS = {'第一署名单位文章数量', '近五年第一署名单位文章数量', '通讯作者文章数量', '近五年通讯作者文章数量'}
+    EXPECTED_PAPER_COLS = {'第一作者文章数量', '近五年第一作者文章数量',
+                           '第一署名单位文章数量', '近五年第一署名单位文章数量',
+                           '通讯作者文章数量', '近五年通讯作者文章数量'}
 
     if cached_paper_hash is None or cached_funding_hash is None:
         print("未找到缓存文件，需要完整计算统计...")
@@ -995,15 +1026,19 @@ DEPT_COL_NAME = '部门\n（行政人员部门暂为学院）'
 
 DEPT_SCATTER_CONFIGS = [
     ('生涯总经费(万元)', '总文章数量'),
+    ('生涯总经费(万元)', '第一作者文章数量'),
     ('生涯总经费(万元)', '第一署名单位文章数量'),
     ('生涯总经费(万元)', '通讯作者文章数量'),
     ('生涯总经费(万元)', '近五年文章数量'),
+    ('生涯总经费(万元)', '近五年第一作者文章数量'),
     ('生涯总经费(万元)', '近五年第一署名单位文章数量'),
     ('生涯总经费(万元)', '近五年通讯作者文章数量'),
     ('近五年总经费(万元)', '总文章数量'),
+    ('近五年总经费(万元)', '第一作者文章数量'),
     ('近五年总经费(万元)', '第一署名单位文章数量'),
     ('近五年总经费(万元)', '通讯作者文章数量'),
     ('近五年总经费(万元)', '近五年文章数量'),
+    ('近五年总经费(万元)', '近五年第一作者文章数量'),
     ('近五年总经费(万元)', '近五年第一署名单位文章数量'),
     ('近五年总经费(万元)', '近五年通讯作者文章数量'),
 ]
@@ -1502,7 +1537,8 @@ def run_department_stats(file_paths=None, output_path=None):
     # 2. 文章/经费统计（利用缓存）
     cached_paper_hash = read_hash_from_csv(paper_csv)
     cached_funding_hash = read_hash_from_csv(funding_csv)
-    EXPECTED_PAPER_COLS = {'第一署名单位文章数量', '近五年第一署名单位文章数量',
+    EXPECTED_PAPER_COLS = {'第一作者文章数量', '近五年第一作者文章数量',
+                           '第一署名单位文章数量', '近五年第一署名单位文章数量',
                            '通讯作者文章数量', '近五年通讯作者文章数量'}
 
     if cached_paper_hash == data_hash and cached_funding_hash == data_hash:
