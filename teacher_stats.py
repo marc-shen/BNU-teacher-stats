@@ -252,8 +252,18 @@ def load_all_data(file_paths=None):
 # ============================================================
 # 教师筛选
 # ============================================================
+EXCLUDED_PERSONNEL = ['普通博后', '学生助理']
+
+
 def filter_teachers(people_df):
-    """筛选岗位子类别包含'教学科研'或'工程实验'的教师"""
+    """筛选岗位子类别包含'教学科研'或'工程实验'的教师，并剔除普通博后和学生助理"""
+    # 先剔除人员分类为"普通博后"或"学生助理"的人员
+    exclude_mask = people_df['人员分类'].isin(EXCLUDED_PERSONNEL)
+    excluded_count = exclude_mask.sum()
+    people_df = people_df[~exclude_mask]
+    if excluded_count > 0:
+        print(f"已剔除人员分类为{'、'.join(EXCLUDED_PERSONNEL)}的人员：{excluded_count} 人")
+
     mask = people_df['岗位子类别'].str.contains('教学科研|工程实验', na=False)
     filtered = people_df[mask].copy()
     print(f"筛选教学科研/工程实验教师：{len(filtered)} 人")
