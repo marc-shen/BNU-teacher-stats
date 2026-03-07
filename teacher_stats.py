@@ -141,6 +141,79 @@ def load_csv_with_hash(csv_path):
 
 
 # ============================================================
+# 缓存统计数据加载/计算
+# ============================================================
+# 期望的文章统计列（用于检测缓存是否需要更新）
+EXPECTED_PAPER_COLS = {'第一作者文章数量', '近五年第一作者文章数量',
+                       '第一署名单位文章数量', '近五年第一署名单位文章数量',
+                       '通讯作者文章数量', '近五年通讯作者文章数量'}
+
+
+def load_or_compute_stats(file_paths=None, output_path=None):
+    """
+    加载或计算文章/经费统计数据（含缓存机制）。
+    返回 (paper_stats, funding_stats, people_df, talent_df,
+           papers_df, vertical_df, horizontal_df, teachers_df, data_hash)
+    其中 papers_df 已去重；papers_df/vertical_df/horizontal_df 仅在需要重新计算时才完整加载，
+    缓存命中时为 None（调用方如需原始数据须自行加载）。
+    """
+    if output_path is not None:
+        output_path = Path(output_path)
+    else:
+        output_path = OUTPUT_PATH
+
+    data_hash = compute_data_hash(file_paths)
+    cache_path = output_path / "cache"
+    os.makedirs(cache_path, exist_ok=True)
+
+    paper_csv = cache_path / "文章统计.csv"
+    funding_csv = cache_path / "经费统计.csv"
+
+    cached_paper_hash = read_hash_from_csv(paper_csv)
+    cached_funding_hash = read_hash_from_csv(funding_csv)
+
+    cache_valid = (cached_paper_hash == data_hash and cached_funding_hash == data_hash)
+
+    if cache_valid:
+        paper_stats = load_csv_with_hash(paper_csv)
+        funding_stats = load_csv_with_hash(funding_csv)
+        cols_ok = EXPECTED_PAPER_COLS.issubset(paper_stats.columns)
+        dept_ok = '院系' in paper_stats.columns and '院系' in funding_stats.columns
+
+        if cols_ok and dept_ok:
+            print("使用缓存的统计数据。")
+            # 缓存完全命中，只需加载 people/talent 用于个人信息和院系
+            people_df, talent_df, _, _, _ = load_all_data(file_paths)
+            teachers_df = filter_teachers(people_df)
+            return (paper_stats, funding_stats, people_df, talent_df,
+                    None, None, None, teachers_df, data_hash)
+
+        # 缓存部分过期——需要完整数据重算
+        print("缓存列不完整，重新计算统计...")
+    else:
+        print("计算统计数据（首次或数据/参数已更新）...")
+
+    # 完整加载 + 计算
+    people_df, talent_df, papers_df, vertical_df, horizontal_df = load_all_data(file_paths)
+    teachers_df = filter_teachers(people_df)
+    papers_cleaned = deduplicate_papers(papers_df)
+
+    paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
+    tdm = _get_teacher_dept_map(teachers_df)
+    paper_stats['院系'] = paper_stats['姓名'].map(tdm).fillna('')
+    save_csv_with_hash(paper_stats, paper_csv, data_hash)
+    print(f"文章统计已保存: {paper_csv}")
+
+    funding_stats = compute_funding_stats(teachers_df, vertical_df, horizontal_df)
+    funding_stats['院系'] = funding_stats['姓名'].map(tdm).fillna('')
+    save_csv_with_hash(funding_stats, funding_csv, data_hash)
+    print(f"经费统计已保存: {funding_csv}")
+
+    return (paper_stats, funding_stats, people_df, talent_df,
+            papers_cleaned, vertical_df, horizontal_df, teachers_df, data_hash)
+
+
+# ============================================================
 # 数据加载
 # ============================================================
 def load_excel(file_path):
@@ -901,97 +974,25 @@ def main(teacher_names=None, file_paths=None, output_path=None):
     print(f"当前年份：{current_year}，统计范围：{_recent_year_range()[0]}-{_recent_year_range()[1]}")
     print("=" * 60)
 
-    # 1. 计算数据文件哈希值
-    print("计算数据文件哈希值...")
-    data_hash = compute_data_hash(file_paths)
-    print(f"数据哈希: {data_hash}")
-
-    # 创建 output 及 cache 子目录
-    cache_path = output_path / "cache"
     os.makedirs(output_path, exist_ok=True)
-    os.makedirs(cache_path, exist_ok=True)
 
-    paper_csv = cache_path / "文章统计.csv"
-    funding_csv = cache_path / "经费统计.csv"
+    # 1. 加载/计算统计数据（含缓存）
+    (paper_stats, funding_stats, people_df, talent_df,
+     _papers, _vert, _horiz, teachers_df, data_hash) = load_or_compute_stats(
+        file_paths=file_paths, output_path=output_path)
 
-    # 检查缓存：如果输出文件存在且哈希一致，直接读取
-    cached_paper_hash = read_hash_from_csv(paper_csv)
-    cached_funding_hash = read_hash_from_csv(funding_csv)
+    # 验证输入的教师存在
+    all_teacher_names = set(teachers_df['姓名'].dropna().astype(str))
+    for n in teacher_names:
+        if n not in all_teacher_names:
+            print(f"警告：教师 '{n}' 不在教学科研/工程实验教师名单中，但仍尝试统计。")
 
-    EXPECTED_PAPER_COLS = {'第一作者文章数量', '近五年第一作者文章数量',
-                           '第一署名单位文章数量', '近五年第一署名单位文章数量',
-                           '通讯作者文章数量', '近五年通讯作者文章数量'}
+    # 2. 合并统计数据（用于散点图）
+    all_stats = paper_stats.merge(funding_stats, on='姓名', how='outer', suffixes=('', '_dup')).fillna(0)
+    if '院系_dup' in all_stats.columns:
+        all_stats.drop(columns=['院系_dup'], inplace=True)
 
-    if cached_paper_hash is None or cached_funding_hash is None:
-        print("未找到缓存文件，需要完整计算统计...")
-        need_recompute = True
-    elif cached_paper_hash != data_hash or cached_funding_hash != data_hash:
-        print("数据文件已更新，重新计算统计...")
-        need_recompute = True
-    else:
-        need_recompute = False
-
-    if not need_recompute:
-        print("数据文件未变化，直接读取已有统计结果。")
-        paper_stats = load_csv_with_hash(paper_csv)
-        funding_stats = load_csv_with_hash(funding_csv)
-        # 如果缓存的CSV缺少新增列，强制重新计算
-        if not EXPECTED_PAPER_COLS.issubset(paper_stats.columns):
-            print("检测到统计列有更新，重新计算文章统计...")
-            people_df, talent_df, papers_df, vertical_df, horizontal_df = load_all_data(file_paths)
-            teachers_df = filter_teachers(people_df)
-            papers_cleaned = deduplicate_papers(papers_df)
-            paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
-            tdm = _get_teacher_dept_map(teachers_df)
-            paper_stats['院系'] = paper_stats['姓名'].map(tdm).fillna('')
-            save_csv_with_hash(paper_stats, paper_csv, data_hash)
-            print(f"文章统计已保存: {paper_csv}")
-        else:
-            # 仍需加载原始数据用于个人信息查询和散点图
-            people_df, talent_df, _, _, _ = load_all_data(file_paths)
-            # 补充院系列（如果缺失）
-            if '院系' not in paper_stats.columns or '院系' not in funding_stats.columns:
-                teachers_df = filter_teachers(people_df)
-                tdm = _get_teacher_dept_map(teachers_df)
-                if '院系' not in paper_stats.columns:
-                    paper_stats['院系'] = paper_stats['姓名'].map(tdm).fillna('')
-                    save_csv_with_hash(paper_stats, paper_csv, data_hash)
-                if '院系' not in funding_stats.columns:
-                    funding_stats['院系'] = funding_stats['姓名'].map(tdm).fillna('')
-                    save_csv_with_hash(funding_stats, funding_csv, data_hash)
-    else:
-        # 1. 加载数据
-        people_df, talent_df, papers_df, vertical_df, horizontal_df = load_all_data(file_paths)
-
-        # 2. 筛选教学科研/工程实验教师
-        teachers_df = filter_teachers(people_df)
-
-        # 验证输入的教师存在
-        all_teacher_names = set(teachers_df['姓名'].dropna().astype(str))
-        for n in teacher_names:
-            if n not in all_teacher_names:
-                print(f"警告：教师 '{n}' 不在教学科研/工程实验教师名单中，但仍尝试统计。")
-
-        # 3. 文章去重
-        papers_cleaned = deduplicate_papers(papers_df)
-
-        # 4. 文章匹配统计
-        paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
-        tdm = _get_teacher_dept_map(teachers_df)
-        paper_stats['院系'] = paper_stats['姓名'].map(tdm).fillna('')
-        save_csv_with_hash(paper_stats, paper_csv, data_hash)
-        print(f"文章统计已保存: {paper_csv}")
-
-        # 5. 经费统计
-        funding_stats = compute_funding_stats(teachers_df, vertical_df, horizontal_df)
-        funding_stats['院系'] = funding_stats['姓名'].map(tdm).fillna('')
-        save_csv_with_hash(funding_stats, funding_csv, data_hash)
-        print(f"经费统计已保存: {funding_csv}")
-
-    # 6. 合并统计数据（用于散点图）
-    all_stats = paper_stats.merge(funding_stats, on='姓名', how='outer').fillna(0)
-
-    # 7. 获取教师个人信息
+    # 3. 获取教师个人信息
     teacher_infos = {}
     for n in teacher_names:
         teacher_infos[n] = get_teacher_info(n, people_df, talent_df)
@@ -999,14 +1000,14 @@ def main(teacher_names=None, file_paths=None, output_path=None):
     print("=" * 60)
     print("生成报告和散点图...")
 
-    # 8. 为每位教师生成个人报告和散点图
+    # 4. 为每位教师生成个人报告和散点图
     for n in teacher_names:
         teacher_dir = output_path / n
         draw_scatter_single(all_stats, n, str(teacher_dir))
         generate_individual_report(n, paper_stats, funding_stats, teacher_infos[n], str(teacher_dir))
         print(f"  教师 {n} 的报告和散点图已生成。")
 
-    # 9. 如果有多个教师，生成对比报告和对比散点图
+    # 5. 如果有多个教师，生成对比报告和对比散点图
     if len(teacher_names) > 1:
         compare_dir = output_path / "对比"
         draw_scatter_comparison(all_stats, teacher_names, str(compare_dir))
@@ -1520,52 +1521,19 @@ def run_department_stats(file_paths=None, output_path=None):
     print(f"当前年份：{current_year}，统计范围：{_recent_year_range()[0]}-{_recent_year_range()[1]}")
     print("=" * 60)
 
-    # 1. 加载数据
-    data_hash = compute_data_hash(file_paths)
-    cache_path = output_path / "cache"
-    os.makedirs(cache_path, exist_ok=True)
-    paper_csv = cache_path / "文章统计.csv"
-    funding_csv = cache_path / "经费统计.csv"
+    # 1. 加载/计算统计数据（含缓存）
+    (paper_stats, funding_stats, people_df, talent_df,
+     papers_cleaned, vertical_df, horizontal_df, teachers_df, data_hash) = load_or_compute_stats(
+        file_paths=file_paths, output_path=output_path)
 
-    people_df, talent_df, papers_df, vertical_df, horizontal_df = load_all_data(file_paths)
-    teachers_df = filter_teachers(people_df)
-    papers_cleaned = deduplicate_papers(papers_df)
+    # 年度趋势图需要原始项目/文章数据；缓存命中时需补充加载
+    if vertical_df is None or horizontal_df is None or papers_cleaned is None:
+        print("加载原始数据用于年度趋势统计...")
+        _, _, papers_df, vertical_df, horizontal_df = load_all_data(file_paths)
+        papers_cleaned = deduplicate_papers(papers_df)
 
-    # 构建教师院系映射
-    teacher_dept_map = _get_teacher_dept_map(teachers_df)
-
-    # 2. 文章/经费统计（利用缓存）
-    cached_paper_hash = read_hash_from_csv(paper_csv)
-    cached_funding_hash = read_hash_from_csv(funding_csv)
-    EXPECTED_PAPER_COLS = {'第一作者文章数量', '近五年第一作者文章数量',
-                           '第一署名单位文章数量', '近五年第一署名单位文章数量',
-                           '通讯作者文章数量', '近五年通讯作者文章数量'}
-
-    if cached_paper_hash == data_hash and cached_funding_hash == data_hash:
-        print("使用缓存的统计数据...")
-        paper_stats = load_csv_with_hash(paper_csv)
-        funding_stats = load_csv_with_hash(funding_csv)
-        if not EXPECTED_PAPER_COLS.issubset(paper_stats.columns):
-            paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
-            paper_stats['院系'] = paper_stats['姓名'].map(teacher_dept_map).fillna('')
-            save_csv_with_hash(paper_stats, paper_csv, data_hash)
-        elif '院系' not in paper_stats.columns:
-            paper_stats['院系'] = paper_stats['姓名'].map(teacher_dept_map).fillna('')
-            save_csv_with_hash(paper_stats, paper_csv, data_hash)
-        if '院系' not in funding_stats.columns:
-            funding_stats['院系'] = funding_stats['姓名'].map(teacher_dept_map).fillna('')
-            save_csv_with_hash(funding_stats, funding_csv, data_hash)
-    else:
-        print("计算统计数据（首次或数据已更新）...")
-        paper_stats = match_papers_for_teachers(teachers_df, papers_cleaned)
-        paper_stats['院系'] = paper_stats['姓名'].map(teacher_dept_map).fillna('')
-        save_csv_with_hash(paper_stats, paper_csv, data_hash)
-        funding_stats = compute_funding_stats(teachers_df, vertical_df, horizontal_df)
-        funding_stats['院系'] = funding_stats['姓名'].map(teacher_dept_map).fillna('')
-        save_csv_with_hash(funding_stats, funding_csv, data_hash)
-
+    # 2. 合并统计
     all_stats = paper_stats.merge(funding_stats, on='姓名', how='outer', suffixes=('', '_dup')).fillna(0)
-    # 解决合并后可能出现的重复院系列
     if '院系_dup' in all_stats.columns:
         all_stats.drop(columns=['院系_dup'], inplace=True)
 
