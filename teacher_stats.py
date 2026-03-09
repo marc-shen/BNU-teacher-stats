@@ -395,11 +395,12 @@ def extract_year(year_str):
         return None
 
 
-def match_papers_for_teachers(teachers_df, papers_df):
+def match_papers_for_teachers(teachers_df, papers_df, aggressive_match=False):
     """
     为所有老师匹配文章，返回统计结果DataFrame。
     匹配规则：
       - 文章归属：中文名出现在"成果归属学者"列
+      - aggressive_match=True 时，同时检查"作者"列（拼音匹配），二者命中一个即算归属
       - 第一作者：英文名出现在"作者"列第一个作者位置（首个分号之前）
       - 通讯作者：英文名出现在"通讯作者"列，或中文名出现在"通讯作者归属"列
       - 第一署名单位："本机构署名顺序"列为"第一署名顺序"
@@ -473,8 +474,15 @@ def match_papers_for_teachers(teachers_df, papers_df):
         for j in range(len(papers_df)):
             scholar_str = scholar_col_vals[j]
 
-            # 只通过"成果归属学者"列匹配（中文名）
-            if name not in scholar_str:
+            # 文章归属匹配
+            matched = name in scholar_str
+            if not matched and aggressive_match:
+                author_str = author_col_vals[j]
+                for fmt in formats_lower:
+                    if fmt in author_str:
+                        matched = True
+                        break
+            if not matched:
                 continue
 
             total_papers += 1
@@ -1313,7 +1321,7 @@ def compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df):
     return pd.DataFrame(results)
 
 
-def compute_yearly_papers_by_dept(teachers_df, papers_df):
+def compute_yearly_papers_by_dept(teachers_df, papers_df, aggressive_match=False):
     """按院系和年份统计文章数量（使用成果归属学者快速匹配），只考虑三个系"""
     five_year_start, recent_year_end = _recent_year_range()
     years = list(range(five_year_start, recent_year_end + 1))
@@ -1324,6 +1332,16 @@ def compute_yearly_papers_by_dept(teachers_df, papers_df):
     papers['_year'] = papers['年'].apply(extract_year)
     scholar_vals = papers['成果归属学者'].fillna('').astype(str).tolist()
     year_vals = papers['_year'].tolist()
+
+    # 激进模式：预生成拼音并预处理作者列
+    if aggressive_match:
+        author_vals = papers['作者'].fillna('').str.lower().tolist()
+        teacher_pinyin = {}
+        for _, row in teachers_df.iterrows():
+            name = row['姓名']
+            if pd.notna(name) and str(name) in teacher_dept:
+                fmts = generate_pinyin_formats(str(name))
+                teacher_pinyin[str(name)] = [f.lower() for f in fmts if f]
 
     dept_year_counts = {}
     total_year_counts = {}
@@ -1337,6 +1355,12 @@ def compute_yearly_papers_by_dept(teachers_df, papers_df):
         for tname, dept in teacher_dept.items():
             if tname in scholar_str:
                 matched_depts.add(dept)
+            elif aggressive_match:
+                author_str = author_vals[idx]
+                for fmt in teacher_pinyin.get(tname, []):
+                    if fmt in author_str:
+                        matched_depts.add(dept)
+                        break
         for dept in matched_depts:
             dept_year_counts[(dept, yr)] = dept_year_counts.get((dept, yr), 0) + 1
         if matched_depts:
@@ -1538,6 +1562,54 @@ def generate_department_report(all_stats, dept_info, comparison,
     md_to_docx(report_path)
 
 
+def _run_single_department_mode(paper_stats, funding_stats, teachers_df, talent_df,
+                                papers_cleaned, vertical_df, horizontal_df,
+                                dept_output, aggressive_match=False):
+    """运行单个模式（保守或激进）的院系统计流水线"""
+    os.makedirs(dept_output, exist_ok=True)
+
+    # 合并统计
+    all_stats = paper_stats.merge(funding_stats, on='姓名', how='outer', suffixes=('', '_dup')).fillna(0)
+    if '院系_dup' in all_stats.columns:
+        all_stats.drop(columns=['院系_dup'], inplace=True)
+
+    dept_info = _get_dept_talent_info(teachers_df, talent_df)
+
+    # 只保留三个系的教师统计
+    dept_stats = all_stats[all_stats['姓名'].isin(dept_info)].copy()
+    print(f"三系教师总数: {len(dept_stats)}（天文: {sum(1 for v in dept_info.values() if v['院系']=='天文')}，"
+          f"物理: {sum(1 for v in dept_info.values() if v['院系']=='物理')}，"
+          f"核科学与技术: {sum(1 for v in dept_info.values() if v['院系']=='核科学与技术')}）")
+
+    # 绘制图表
+    print("生成散点图...")
+    draw_department_scatters(dept_stats, dept_info, str(dept_output))
+
+    print("生成特聘对比图...")
+    comparison = draw_talent_comparison(dept_stats, dept_info, str(dept_output))
+
+    print("计算并绘制年度经费趋势...")
+    yearly_funding = compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df)
+    draw_yearly_funding_chart(yearly_funding, str(dept_output))
+
+    print("计算并绘制年度文章趋势...")
+    yearly_papers = compute_yearly_papers_by_dept(teachers_df, papers_cleaned,
+                                                   aggressive_match=aggressive_match)
+    draw_yearly_paper_chart(yearly_papers, str(dept_output))
+
+    # 保存数据和生成报告
+    yearly_funding.to_csv(os.path.join(str(dept_output), '年度经费统计.csv'),
+                          index=False, encoding='utf-8-sig')
+    yearly_papers.to_csv(os.path.join(str(dept_output), '年度文章统计.csv'),
+                         index=False, encoding='utf-8-sig')
+    dept_stats.to_csv(os.path.join(str(dept_output), '教师综合统计.csv'),
+                      index=False, encoding='utf-8-sig')
+
+    print("生成统计报告...")
+    generate_department_report(dept_stats, dept_info, comparison,
+                               yearly_funding, yearly_papers, str(dept_output))
+
+
 def run_department_stats(file_paths=None, output_path=None):
     """运行院系整体统计分析"""
     if output_path is not None:
@@ -1554,59 +1626,65 @@ def run_department_stats(file_paths=None, output_path=None):
     print(f"当前年份：{current_year}，统计范围：{_recent_year_range()[0]}-{_recent_year_range()[1]}")
     print("=" * 60)
 
-    # 1. 加载/计算统计数据（含缓存）
-    (paper_stats, funding_stats, people_df, talent_df,
+    # 1. 加载/计算保守模式统计数据（含缓存）
+    (paper_stats_conservative, funding_stats, people_df, talent_df,
      papers_cleaned, vertical_df, horizontal_df, teachers_df, data_hash) = load_or_compute_stats(
         file_paths=file_paths, output_path=output_path)
 
-    # 年度趋势图需要原始项目/文章数据；缓存命中时需补充加载
+    # 年度趋势图和激进模式需要原始数据；缓存命中时需补充加载
     if vertical_df is None or horizontal_df is None or papers_cleaned is None:
         print("加载原始数据用于年度趋势统计...")
         _, _, papers_df, vertical_df, horizontal_df = load_all_data(file_paths)
         papers_cleaned = deduplicate_papers(papers_df)
 
-    # 2. 合并统计
-    all_stats = paper_stats.merge(funding_stats, on='姓名', how='outer', suffixes=('', '_dup')).fillna(0)
-    if '院系_dup' in all_stats.columns:
-        all_stats.drop(columns=['院系_dup'], inplace=True)
+    # 2. 计算激进模式的文章统计（使用单独缓存）
+    cache_path = output_path / "cache"
+    os.makedirs(cache_path, exist_ok=True)
+    aggressive_paper_csv = cache_path / "文章统计_aggressive.csv"
+    cached_aggressive_hash = read_hash_from_csv(aggressive_paper_csv)
 
-    dept_info = _get_dept_talent_info(teachers_df, talent_df)
+    if cached_aggressive_hash == data_hash:
+        paper_stats_aggressive = load_csv_with_hash(aggressive_paper_csv)
+        cols_ok = EXPECTED_PAPER_COLS.issubset(paper_stats_aggressive.columns)
+        dept_ok = '院系' in paper_stats_aggressive.columns
+        if cols_ok and dept_ok:
+            print("使用缓存的激进模式文章统计数据。")
+        else:
+            cached_aggressive_hash = None  # 缓存列不完整
 
-    # 只保留三个系的教师统计
-    dept_stats = all_stats[all_stats['姓名'].isin(dept_info)].copy()
-    print(f"三系教师总数: {len(dept_stats)}（天文: {sum(1 for v in dept_info.values() if v['院系']=='天文')}，"
-          f"物理: {sum(1 for v in dept_info.values() if v['院系']=='物理')}，"
-          f"核科学与技术: {sum(1 for v in dept_info.values() if v['院系']=='核科学与技术')}）")
+    if cached_aggressive_hash != data_hash:
+        print("计算激进模式文章统计数据...")
+        paper_stats_aggressive = match_papers_for_teachers(
+            teachers_df, papers_cleaned, aggressive_match=True)
+        tdm = _get_teacher_dept_map(teachers_df)
+        paper_stats_aggressive['院系'] = paper_stats_aggressive['姓名'].map(tdm).fillna('')
+        save_csv_with_hash(paper_stats_aggressive, aggressive_paper_csv, data_hash)
+        print(f"激进模式文章统计已保存: {aggressive_paper_csv}")
 
-    # 3. 绘制图表
-    print("生成散点图...")
-    draw_department_scatters(dept_stats, dept_info, str(dept_output))
+    # 3. 分别运行保守和激进两种模式
+    conservative_output = dept_output / "保守"
+    aggressive_output = dept_output / "激进"
 
-    print("生成特聘对比图...")
-    comparison = draw_talent_comparison(dept_stats, dept_info, str(dept_output))
+    print("\n" + "=" * 60)
+    print("运行保守模式统计...")
+    print("=" * 60)
+    _run_single_department_mode(
+        paper_stats_conservative, funding_stats, teachers_df, talent_df,
+        papers_cleaned, vertical_df, horizontal_df,
+        conservative_output, aggressive_match=False)
 
-    print("计算并绘制年度经费趋势...")
-    yearly_funding = compute_yearly_funding_by_dept(teachers_df, vertical_df, horizontal_df)
-    draw_yearly_funding_chart(yearly_funding, str(dept_output))
-
-    print("计算并绘制年度文章趋势...")
-    yearly_papers = compute_yearly_papers_by_dept(teachers_df, papers_cleaned)
-    draw_yearly_paper_chart(yearly_papers, str(dept_output))
-
-    # 4. 保存数据和生成报告
-    yearly_funding.to_csv(os.path.join(str(dept_output), '年度经费统计.csv'),
-                          index=False, encoding='utf-8-sig')
-    yearly_papers.to_csv(os.path.join(str(dept_output), '年度文章统计.csv'),
-                         index=False, encoding='utf-8-sig')
-    dept_stats.to_csv(os.path.join(str(dept_output), '教师综合统计.csv'),
-                      index=False, encoding='utf-8-sig')
-
-    print("生成统计报告...")
-    generate_department_report(dept_stats, dept_info, comparison,
-                               yearly_funding, yearly_papers, str(dept_output))
+    print("\n" + "=" * 60)
+    print("运行激进模式统计...")
+    print("=" * 60)
+    _run_single_department_mode(
+        paper_stats_aggressive, funding_stats, teachers_df, talent_df,
+        papers_cleaned, vertical_df, horizontal_df,
+        aggressive_output, aggressive_match=True)
 
     print("=" * 60)
     print(f"院系统计完成！输出目录: {dept_output}")
+    print(f"  保守模式: {conservative_output}")
+    print(f"  激进模式: {aggressive_output}")
     return str(dept_output)
 
 
