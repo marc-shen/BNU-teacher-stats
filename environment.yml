@@ -4,38 +4,18 @@ channels:
   - defaults
 
 dependencies:
-  # Python 版本
-  - python=3.12.*
-  
-  # 数据处理
-  - pandas>=2.3.2,<3
-  
-  # Jupyter 相关
-  - jupyter>=1.1.1,<2
-  - ipython>=9.5.0,<10
-  - ipykernel>=6.30.1,<7
-  
-  # 可视化
-  - matplotlib>=3.10.6,<4
-  
-  # Excel 文件处理
-  - xlrd>=2.0.2,<3
-  - openpyxl>=3.1.5,<4
-  
-  # 其他工具
-  - pypinyin>=0.55.0,<0.56
-  - adjusttext>=1.3.0,<2
-  - pandoc>=3.9,<4
-  
-  # 打包工具 (用于 PyInstaller)
-  - pyinstaller>=6.15.0,<7
-  
-  # pip 包管理
+  - python=3.12
+  - pandas=2.3.2
+  - jupyter=1.1.1
+  - ipython=9.5.0
+  - ipykernel=6.30.1
+  - matplotlib=3.10.6
+  - xlrd=2.0.2
+  - openpyxl=3.1.5
+  - pypinyin=0.55.0
+  - adjusttext=1.3.0
+  - pandoc=3.9
+  - pyinstaller=6.15.0
   - pip
-  
-  # 通过 pip 安装的包
   - pip:
     - ./PySimpleGUI-4.60.5-py3-none-any.whl
-
-platforms:
-  - osx-64
